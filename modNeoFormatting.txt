@@ -145,6 +145,9 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
     Dim pairIndex As Long
     Dim movementCodes As Variant
     Dim movementAmounts As Variant
+    Dim statusValues As Variant
+    Dim statusRow As Long
+    Dim statusColumn As Long
     Dim errNumber As Long
     Dim errDescription As String
 
@@ -173,11 +176,23 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
             groupAddress = ws.Cells(firstRow, groupIndex).Address(False, True)
             doneAddress = ws.Cells(firstRow, 1).Address(False, True)
             doubtAddress = ws.Cells(firstRow, 2).Address(False, True)
-            formula = "=(" & doneAddress & "="""")*(" & doubtAddress & "="""")*(" & _
-                groupAddress & "=""Cash"")"
+            formula = "=(" & doneAddress & "<>""" & ChrW(&H2713) & """)*(" & _
+                doubtAddress & "<>""?"")*(" & groupAddress & "=""Cash"")"
             Call AddFillRule(body, formula, RGB(230, 240, 255))
             Call AddFillRule(body, "=" & doubtAddress & "=""?""", RGB(255, 217, 179))
             Call AddFillRule(body, "=" & doneAddress & "=""" & ChrW(&H2713) & """", RGB(198, 239, 206))
+            Set statusRange = ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2))
+            statusValues = statusRange.Value2
+            For statusRow = 1 To UBound(statusValues, 1)
+                For statusColumn = 1 To 2
+                    If Len(CleanText(statusValues(statusRow, statusColumn))) = 0 Then
+                        statusValues(statusRow, statusColumn) = ChrW(&H2610)
+                    End If
+                Next statusColumn
+            Next statusRow
+            statusRange.Value2 = statusValues
+            statusRange.NumberFormat = "@"
+            statusRange.Font.Size = 14
             ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)).Font.Bold = True
             ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)).Font.Name = "Segoe UI Symbol"
             ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)).HorizontalAlignment = xlCenter
