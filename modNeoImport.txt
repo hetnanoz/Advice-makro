@@ -157,7 +157,7 @@ Public Sub ValidateNeoHeaders(ByVal ws As Worksheet, ByVal lastColumn As Long)
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    required = Array("Fund", HDR_GROUP, HDR_KEY, HDR_STATUS, HDR_QUANTITY, _
+    required = Array(HDR_FUND, HDR_ISIN, HDR_GROUP, HDR_KEY, HDR_STATUS, HDR_QUANTITY, _
         HDR_SEC_CODE, HDR_SEC_QUANTITY, HDR_CASH_CODE, HDR_CASH_AMOUNT)
     For Each header In required
         index = GetColumnIndexByHeader(ws, 1, CStr(header))
