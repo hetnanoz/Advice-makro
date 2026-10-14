@@ -153,7 +153,7 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       None
-' Description:   Build native slicers and macro buttons without relying on active objects (FIX02).
+' Description:   Build native slicers and macro buttons without relying on active objects (FIX03).
 '-------------------------------------------------------------------------------
 Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boolean)
     Const METHOD_NAME As String = "CreateDashboardControls"
@@ -579,11 +579,9 @@ Private Function TryTableSlicerCache(ByVal wb As Workbook, ByVal lo As ListObjec
     On Error Resume Next
     VBA.Err.Clear
     If legacyMethod Then
-        Set TryTableSlicerCache = wb.SlicerCaches.Add(Source:=lo.Name, SourceField:=fieldName, _
-            SlicerCacheType:=xlSlicer)
+        Set TryTableSlicerCache = wb.SlicerCaches.Add(lo.Name, fieldName)
     Else
-        Set TryTableSlicerCache = wb.SlicerCaches.Add2(Source:=lo.Name, SourceField:=fieldName, _
-            SlicerCacheType:=xlSlicer)
+        Set TryTableSlicerCache = wb.SlicerCaches.Add2(lo.Name, fieldName)
     End If
     failureNumber = VBA.Err.Number
     failureDescription = VBA.Err.Description
@@ -740,7 +738,7 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       None
-' Description:   Validate the table identity after the native slicer has been created (FIX02).
+' Description:   Validate the table identity after the native slicer has been created (FIX03).
 '-------------------------------------------------------------------------------
 Private Sub ValidateTableSlicerSource(ByVal cache As SlicerCache, ByVal expectedTable As ListObject)
     Const METHOD_NAME As String = "ValidateTableSlicerSource"
@@ -831,7 +829,7 @@ ExitPoint:
     If cleanupFailed And errNumber = 0 Then errNumber = TOOL_ERROR + 101
     If completed And errNumber = 0 Then
         MsgBox "Kontrolki Dashboardu zostaly odtworzone. Dane i Done/Doubt pozostaly bez zmian.", _
-            vbInformation, "NeoAdvices - FIX02"
+            vbInformation, "NeoAdvices - FIX03"
     End If
     If errNumber <> 0 Then
         Call DisplayErrors
