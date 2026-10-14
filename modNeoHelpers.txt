@@ -96,7 +96,12 @@ Public Sub RestoreExcelStateSafe(ByRef state As TExcelState, ByRef hadFailure As
                 Case 1: Application.AutomationSecurity = state.AutomationSecurity
                 Case 2: Application.Calculation = state.Calculation
                 Case 3: Application.DisplayAlerts = state.DisplayAlerts
-                Case 4: Application.StatusBar = state.StatusBar
+                Case 4
+                    If VarType(state.StatusBar) = vbBoolean Then
+                        Application.StatusBar = False
+                    Else
+                        Application.StatusBar = CStr(state.StatusBar)
+                    End If
                 Case 5: Application.ScreenUpdating = state.ScreenUpdating
                 Case 6: Application.EnableEvents = state.EnableEvents
                 Case 7: Application.EnableCancelKey = state.EnableCancelKey
@@ -611,36 +616,57 @@ End Function
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
-' Returns:       None
-' Description:   Avoid closing or modifying a workbook already owned by the user.
+' Returns:       Workbook
+' Description:   Reuse an open input by its full path; flag only new read-only opens as owned.
 '-------------------------------------------------------------------------------
-Public Sub RequireClosedPath(ByVal filePath As String)
-    Const METHOD_NAME As String = "RequireClosedPath"
+Public Function AcquireInputWorkbook(ByVal filePath As String, _
+                                     ByRef openedByTool As Boolean) As Workbook
+    Const METHOD_NAME As String = "AcquireInputWorkbook"
     Dim wb As Workbook
+    Dim fso As Object
+    Dim selectedPath As String
     Dim errNumber As Long
     Dim errDescription As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
+    openedByTool = False
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    selectedPath = fso.GetAbsolutePathName(filePath)
     For Each wb In Application.Workbooks
-        If StrComp(wb.FullName, filePath, vbTextCompare) = 0 Then
-            Err.Raise TOOL_ERROR + 16, METHOD_NAME, _
-                "The selected input is already open. Close it and run the process again."
+        If StrComp(wb.FullName, selectedPath, vbTextCompare) = 0 Then
+            Set AcquireInputWorkbook = wb
+            Exit For
         End If
     Next wb
+    If AcquireInputWorkbook Is Nothing Then
+        For Each wb In Application.Workbooks
+            If StrComp(wb.Name, fso.GetFileName(selectedPath), vbTextCompare) = 0 Then
+                Err.Raise TOOL_ERROR + 93, METHOD_NAME, _
+                    "A workbook with this filename is open under another path. " & _
+                    "Select its exact saved path; filename-only matching is unsafe."
+            End If
+        Next wb
+        Set AcquireInputWorkbook = Application.Workbooks.Open( _
+            Filename:=selectedPath, UpdateLinks:=0, ReadOnly:=True, _
+            IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+        openedByTool = True
+    End If
 
 ExitPoint:
+    Set wb = Nothing
+    Set fso = Nothing
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
-    Exit Sub
+    Exit Function
 
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
-End Sub
+End Function
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
@@ -665,4 +691,35 @@ Public Sub RestoreEventsSafe(ByVal previousEvents As Boolean, ByRef hadFailure A
     End If
     On Error GoTo 0
 End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Input reference, ownership flag and accumulated cleanup status.
+' Returns:       None.
+' Description:   Release an input without closing a workbook owned by the user.
+'-------------------------------------------------------------------------------
+Public Sub ReleaseInputWorkbookSafe(ByRef wb As Workbook, ByRef openedByTool As Boolean, _
+                                    ByRef hadFailure As Boolean)
+    Dim cleanupNumber As Long
+    Dim cleanupDescription As String
+
+    On Error Resume Next
+    VBA.Err.Clear
+    If openedByTool Then
+        Call CloseWorkbookSafe(wb, hadFailure)
+        If wb Is Nothing Then openedByTool = False
+    Else
+        Set wb = Nothing
+    End If
+    cleanupNumber = VBA.Err.Number
+    cleanupDescription = VBA.Err.Description
+    VBA.Err.Clear
+    If cleanupNumber <> 0 Then
+        hadFailure = True
+        Call RecordError(CLASS_NAME, "ReleaseInputWorkbookSafe", cleanupNumber, cleanupDescription)
+    End If
+    On Error GoTo 0
+End Sub
+
 
