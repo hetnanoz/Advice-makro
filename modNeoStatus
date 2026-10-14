@@ -1,0 +1,292 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoStatus"
+Private pMenuChoice As Long
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   ApplyNeoStatus - UPDATE06.
+'-------------------------------------------------------------------------------
+Public Sub ApplyNeoStatus(ByVal ws As Worksheet, ByVal target As Range, ByVal mode As Long)
+    Const METHOD_NAME As String = "ApplyNeoStatus"
+    Dim lo As ListObject
+    Dim hit As Range
+    Dim area As Range
+    Dim selectedRow As Range
+    Dim rowKeys As Object
+    Dim key As Variant
+    Dim rowIndex As Long
+    Dim marks(1 To 1, 1 To 2) As Variant
+    Dim state As TExcelState
+    Dim cleanupFailed As Boolean
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If mode < 0 Or mode > 2 Then
+        Err.Raise TOOL_ERROR + 120, METHOD_NAME, "Unknown status mode."
+    End If
+    If Not target.Parent Is ws Then
+        Err.Raise TOOL_ERROR + 121, METHOD_NAME, "Status target belongs to another worksheet."
+    End If
+    If ws.ProtectContents Then
+        Err.Raise TOOL_ERROR + 122, METHOD_NAME, "Unprotect Dashboard before changing statuses."
+    End If
+    Set lo = ws.ListObjects(TABLE_DASHBOARD)
+    Set rowKeys = CreateObject("Scripting.Dictionary")
+    If Not lo.DataBodyRange Is Nothing Then
+        Set hit = Application.Intersect(target, lo.DataBodyRange)
+        If Not hit Is Nothing Then
+            For Each area In hit.Areas
+                For Each selectedRow In area.Rows
+                    If Not selectedRow.EntireRow.Hidden Then
+                        rowIndex = selectedRow.Row - lo.DataBodyRange.Row + 1
+                        If Not rowKeys.Exists(rowIndex) Then rowKeys.Add rowIndex, True
+                    End If
+                Next selectedRow
+            Next area
+        End If
+    End If
+    If rowKeys.Count > 0 Then
+        marks(1, 1) = ChrW(&H2610)
+        marks(1, 2) = ChrW(&H2610)
+        If mode = 1 Then marks(1, 1) = ChrW(&H2713)
+        If mode = 2 Then marks(1, 2) = "?"
+        Call CaptureExcelState(state)
+        Application.EnableEvents = False
+        Application.ScreenUpdating = False
+        For Each key In rowKeys.Keys
+            lo.DataBodyRange.Rows(CLng(key)).Cells(1, 1).Resize(1, 2).Value2 = marks
+        Next key
+        ' Existing conditional formats preserve CANC backgrounds and movement font colors.
+        ws.Calculate
+    End If
+
+ExitPoint:
+    Call RestoreExcelStateSafe(state, cleanupFailed)
+    Set selectedRow = Nothing
+    Set area = Nothing
+    Set hit = Nothing
+    Set rowKeys = Nothing
+    Set lo = Nothing
+    If cleanupFailed And errNumber = 0 Then
+        errNumber = TOOL_ERROR + 123
+        errDescription = "Could not restore Excel state after changing statuses."
+    End If
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   ChooseNeoStatus - UPDATE06.
+'-------------------------------------------------------------------------------
+Public Function ChooseNeoStatus(ByVal wb As Workbook) As Long
+    Const METHOD_NAME As String = "ChooseNeoStatus"
+    Dim popup As CommandBar
+    Dim button As CommandBarButton
+    Dim captions As Variant
+    Dim macros As Variant
+    Dim index As Long
+    Dim cleanupFailed As Boolean
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    pMenuChoice = -1
+    captions = Array("Done - zaznaczone widoczne wiersze", "Doubt - zaznaczone widoczne wiersze", _
+        "Wyczysc status - zaznaczone widoczne wiersze")
+    macros = Array("NeoMenuDone", "NeoMenuDoubt", "NeoMenuClear")
+    Set popup = Application.CommandBars.Add(Position:=msoBarPopup, Temporary:=True)
+    For index = 0 To 2
+        Set button = popup.Controls.Add(Type:=msoControlButton, Temporary:=True)
+        button.Caption = CStr(captions(index))
+        button.Style = msoButtonCaption
+        button.OnAction = "'" & Replace(wb.Name, "'", "''") & "'!" & CStr(macros(index))
+    Next index
+    popup.ShowPopup
+    ChooseNeoStatus = pMenuChoice
+
+ExitPoint:
+    Call DeleteNeoPopupSafe(popup, cleanupFailed)
+    Set button = Nothing
+    pMenuChoice = -1
+    If cleanupFailed And errNumber = 0 Then
+        errNumber = TOOL_ERROR + 124
+        errDescription = "Could not remove the temporary status menu."
+    End If
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   NeoMenuDone - UPDATE06.
+'-------------------------------------------------------------------------------
+Public Sub NeoMenuDone()
+    Const METHOD_NAME As String = "NeoMenuDone"
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    pMenuChoice = 1
+
+ExitPoint:
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   NeoMenuDoubt - UPDATE06.
+'-------------------------------------------------------------------------------
+Public Sub NeoMenuDoubt()
+    Const METHOD_NAME As String = "NeoMenuDoubt"
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    pMenuChoice = 2
+
+ExitPoint:
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   NeoMenuClear - UPDATE06.
+'-------------------------------------------------------------------------------
+Public Sub NeoMenuClear()
+    Const METHOD_NAME As String = "NeoMenuClear"
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    pMenuChoice = 0
+
+ExitPoint:
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   Delete only this event's temporary menu; preserve the original error.
+'-------------------------------------------------------------------------------
+Private Sub DeleteNeoPopupSafe(ByRef popup As CommandBar, ByRef hadFailure As Boolean)
+    Dim cleanupNumber As Long
+    Dim cleanupDescription As String
+
+    On Error Resume Next
+    VBA.Err.Clear
+    If Not popup Is Nothing Then popup.Delete
+    cleanupNumber = VBA.Err.Number
+    cleanupDescription = VBA.Err.Description
+    VBA.Err.Clear
+    On Error GoTo 0
+    Set popup = Nothing
+    If cleanupNumber <> 0 Then
+        hadFailure = True
+        Call RecordError(CLASS_NAME, "DeleteNeoPopupSafe", cleanupNumber, cleanupDescription)
+    End If
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   EnableNeoInteraction - UPDATE06.
+'-------------------------------------------------------------------------------
+Public Sub EnableNeoInteraction()
+    Const METHOD_NAME As String = "EnableNeoInteraction"
+    Dim wbMaster As Workbook
+    Dim ws As Worksheet
+    Dim lo As ListObject
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wbMaster = Application.ActiveWorkbook
+    Call ResetErrors
+    If wbMaster Is Nothing Then Err.Raise TOOL_ERROR + 125, METHOD_NAME, "No active workbook."
+    Set ws = RequiredSheet(wbMaster, SHEET_DASHBOARD)
+    Set lo = ws.ListObjects(TABLE_DASHBOARD)
+    ' This explicit repair command intentionally enables events; it is not temporary suspension.
+    Application.EnableEvents = True
+    MsgBox "UPDATE06: zdarzenia Excela wlaczone." & vbCrLf & _
+        "Dwuklik w Done/Doubt albo zaznacz wiersze i kliknij prawym wewnatrz zaznaczenia." & vbCrLf & _
+        "Kod Dashboard_Sheet musi byc w module ARKUSZA Dashboard.", vbInformation, "NeoAdvices"
+
+ExitPoint:
+    Set lo = Nothing
+    Set ws = Nothing
+    Set wbMaster = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
