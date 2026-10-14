@@ -293,9 +293,9 @@ Private Sub SaveIndividualCopy(ByVal wbMaster As Workbook, ByVal filePath As Str
         allocationDate, runStamp, accountantName)
     With wbIndividual.Worksheets(SHEET_DASHBOARD).Cells(10, 1)
         If includeSources Then
-            .Value2 = CStr(.Value2) & " | UPDATE06 | Source sheets: YES"
+            .Value2 = CStr(.Value2) & " | UPDATE07 | Source sheets: YES"
         Else
-            .Value2 = CStr(.Value2) & " | UPDATE06 | Source sheets: NO"
+            .Value2 = CStr(.Value2) & " | UPDATE07 | Source sheets: NO"
         End If
     End With
     Call RebindDashboardButtons(wbIndividual, wbIndividual.Name)
@@ -344,7 +344,11 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
     Dim wbTemplate As Workbook
     Dim wbSource As Workbook
     Dim templatePath As String
+    Dim templateFolder As String
+    Dim fso As Object
+    Dim stepDescription As String
     Dim templateCreated As Boolean
+    Dim templateFolderCreated As Boolean
     Dim state As TExcelState
     Dim cleanupFailed As Boolean
     Dim errNumber As Long
@@ -357,12 +361,21 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
     Application.DisplayAlerts = False
     Application.EnableEvents = False
     Application.AutomationSecurity = msoAutomationSecurityForceDisable
+    Application.EnableCancelKey = xlErrorHandler
     Set wbSource = wbMaster
     If counts.Count > 0 And Not includeSources Then
-        Application.StatusBar = "NeoAdvices: preparing Dashboard-only export template..."
-        templatePath = UniqueOutputPath(folderPath, "NeoAdvices_TEMP_TEMPLATE_" & runStamp)
-        wbMaster.SaveCopyAs templatePath
+        Application.Calculation = xlCalculationManual
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        templateFolder = fso.BuildPath(fso.GetSpecialFolder(2).Path, "NeoAdvices_" & fso.GetTempName)
+        fso.CreateFolder templateFolder
+        templateFolderCreated = True
+        templatePath = UniqueOutputPath(templateFolder, "NeoAdvices_TEMP_TEMPLATE_" & runStamp)
+        stepDescription = "1/6 - saving template in system TEMP folder"
+        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
         templateCreated = True
+        wbMaster.SaveCopyAs templatePath
+        stepDescription = "2/6 - opening template"
+        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
         Set wbTemplate = Application.Workbooks.Open(Filename:=templatePath, UpdateLinks:=0, _
             ReadOnly:=False, IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
         If wbTemplate.ReadOnly Then
@@ -373,18 +386,27 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
         End If
         ' Only the owned temporary copy loses source sheets. Dashboard and its event code remain.
         wbTemplate.Worksheets(SHEET_DASHBOARD).Visible = xlSheetVisible
+        stepDescription = "3/6 - removing template slicer caches"
+        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
         Call RemoveAllSlicerCaches(wbTemplate)
-        wbTemplate.Worksheets(SHEET_NEO).Delete
-        wbTemplate.Worksheets(SHEET_REPARTITION).Delete
+        stepDescription = "4/6 - deleting both source sheets (calculation suspended)"
+        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
+        wbTemplate.Worksheets(Array(SHEET_NEO, SHEET_REPARTITION)).Delete
         If wbTemplate.Sheets.Count <> 1 Then
             Err.Raise TOOL_ERROR + 105, METHOD_NAME, "Export template contains unexpected sheets."
         End If
+        stepDescription = "5/6 - saving Dashboard-only template"
+        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
         wbTemplate.Save
         Set wbSource = wbTemplate
+        stepDescription = "6/6 - restoring calculation mode"
+        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
+        Application.Calculation = state.Calculation
     End If
     For Each accountant In counts.Keys
         completed = completed + 1
-        Application.StatusBar = "NeoAdvices: accountant file " & CStr(completed) & " / " & CStr(counts.Count)
+        stepDescription = "accountant file " & CStr(completed) & " / " & CStr(counts.Count)
+        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
         filePath = UniqueOutputPath(folderPath, _
             "NeoAdvices_" & CleanFileName(CStr(accountant)) & "_" & runStamp)
         Call SaveIndividualCopy(wbSource, filePath, CStr(accountant), _
@@ -397,6 +419,10 @@ ExitPoint:
     If templateCreated Then
         If Not cleanupFailed Then Call DeleteExportTemplateSafe(templatePath, cleanupFailed)
     End If
+    If templateFolderCreated Then
+        If Not cleanupFailed Then Call RemoveExportFolderSafe(templateFolder, cleanupFailed)
+    End If
+    Set fso = Nothing
     Call RestoreExcelStateSafe(state, cleanupFailed)
     If cleanupFailed And errNumber = 0 Then
         errNumber = TOOL_ERROR + 106
@@ -410,7 +436,7 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, stepDescription)
     GoTo ExitPoint
 End Sub
 
@@ -475,16 +501,19 @@ End Sub
 ' Description:   Do not publish a successful batch if its temporary template cannot be removed.
 '-------------------------------------------------------------------------------
 Private Sub DeleteExportTemplateSafe(ByVal filePath As String, ByRef hadFailure As Boolean)
+    Dim fso As Object
     Dim cleanupNumber As Long
     Dim cleanupDescription As String
 
     On Error Resume Next
     VBA.Err.Clear
-    Kill filePath
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FileExists(filePath) Then fso.DeleteFile filePath, False
     cleanupNumber = VBA.Err.Number
     cleanupDescription = VBA.Err.Description
     VBA.Err.Clear
     On Error GoTo 0
+    Set fso = Nothing
     If cleanupNumber <> 0 Then
         hadFailure = True
         Call RecordError(CLASS_NAME, "DeleteExportTemplateSafe", cleanupNumber, cleanupDescription)
@@ -549,4 +578,28 @@ ErrHandler:
     errDescription = VBA.Err.Description
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Exact private TEMP folder created by this export, plus cleanup status.
+' Returns:       None.
+' Description:   Remove only the empty owned folder; never recursively delete its contents.
+'-------------------------------------------------------------------------------
+Private Sub RemoveExportFolderSafe(ByVal folderPath As String, ByRef hadFailure As Boolean)
+    Dim cleanupNumber As Long
+    Dim cleanupDescription As String
+
+    On Error Resume Next
+    VBA.Err.Clear
+    RmDir folderPath
+    cleanupNumber = VBA.Err.Number
+    cleanupDescription = VBA.Err.Description
+    VBA.Err.Clear
+    On Error GoTo 0
+    If cleanupNumber <> 0 Then
+        hadFailure = True
+        Call RecordError(CLASS_NAME, "RemoveExportFolderSafe", cleanupNumber, cleanupDescription)
+    End If
 End Sub
