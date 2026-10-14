@@ -153,7 +153,7 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       None
-' Description:   Build native slicers and macro buttons without relying on active objects (FIX01).
+' Description:   Build native slicers and macro buttons without relying on active objects (FIX02).
 '-------------------------------------------------------------------------------
 Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boolean)
     Const METHOD_NAME As String = "CreateDashboardControls"
@@ -579,9 +579,11 @@ Private Function TryTableSlicerCache(ByVal wb As Workbook, ByVal lo As ListObjec
     On Error Resume Next
     VBA.Err.Clear
     If legacyMethod Then
-        Set TryTableSlicerCache = wb.SlicerCaches.Add(lo, fieldName)
+        Set TryTableSlicerCache = wb.SlicerCaches.Add(Source:=lo.Name, SourceField:=fieldName, _
+            SlicerCacheType:=xlSlicer)
     Else
-        Set TryTableSlicerCache = wb.SlicerCaches.Add2(lo, fieldName)
+        Set TryTableSlicerCache = wb.SlicerCaches.Add2(Source:=lo.Name, SourceField:=fieldName, _
+            SlicerCacheType:=xlSlicer)
     End If
     failureNumber = VBA.Err.Number
     failureDescription = VBA.Err.Description
@@ -652,7 +654,6 @@ Private Sub CreateNativeTableSlicer(ByVal wb As Workbook, ByVal ws As Worksheet,
     Const METHOD_NAME As String = "CreateNativeTableSlicer"
     Dim cache As SlicerCache
     Dim slicer As Slicer
-    Dim sourceTable As ListObject
     Dim stepDescription As String
     Dim firstFailure As String
     Dim failureNumber As Long
@@ -687,11 +688,6 @@ Private Sub CreateNativeTableSlicer(ByVal wb As Workbook, ByVal ws As Worksheet,
         If Len(failureDescription) = 0 Then failureDescription = "Excel returned no slicer cache."
         Err.Raise failureNumber, METHOD_NAME, failureDescription
     End If
-    stepDescription = "Validate cache source; field=" & fieldName
-    Set sourceTable = cache.ListObject
-    If Not sourceTable Is lo Then
-        Err.Raise TOOL_ERROR + 98, METHOD_NAME, "The slicer cache is not linked to tblDashboard."
-    End If
     firstFailure = vbNullString
     stepDescription = "Add slicer using worksheet object; field=" & fieldName
     Set slicer = TryTableSlicer(cache, ws, False, failureNumber, failureDescription)
@@ -707,6 +703,8 @@ Private Sub CreateNativeTableSlicer(ByVal wb As Workbook, ByVal ws As Worksheet,
         If Len(failureDescription) = 0 Then failureDescription = "Excel returned no slicer control."
         Err.Raise failureNumber, METHOD_NAME, failureDescription
     End If
+    stepDescription = "Validate completed slicer source; field=" & fieldName
+    Call ValidateTableSlicerSource(cache, lo)
     stepDescription = "Set caption; field=" & fieldName
     slicer.Caption = fieldName
     stepDescription = "Set layout; field=" & fieldName
@@ -721,7 +719,6 @@ Private Sub CreateNativeTableSlicer(ByVal wb As Workbook, ByVal ws As Worksheet,
 
 ExitPoint:
     If Not completed Then Call DeleteNewSlicerCacheSafe(cache)
-    Set sourceTable = Nothing
     Set slicer = Nothing
     Set cache = Nothing
     If errNumber <> 0 Then
@@ -743,6 +740,69 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       None
+' Description:   Validate the table identity after the native slicer has been created (FIX02).
+'-------------------------------------------------------------------------------
+Private Sub ValidateTableSlicerSource(ByVal cache As SlicerCache, ByVal expectedTable As ListObject)
+    Const METHOD_NAME As String = "ValidateTableSlicerSource"
+    Dim actualTable As ListObject
+    Dim actualSheet As Worksheet
+    Dim expectedSheet As Worksheet
+    Dim actualBook As Workbook
+    Dim expectedBook As Workbook
+    Dim matches As Boolean
+    Dim sourceContext As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    sourceContext = "Expected table=" & expectedTable.Name
+    If Not cache.List Then
+        Err.Raise TOOL_ERROR + 98, METHOD_NAME, "Excel created a non-table slicer cache."
+    End If
+    Set actualTable = cache.ListObject
+    If actualTable Is Nothing Then
+        Err.Raise TOOL_ERROR + 98, METHOD_NAME, "Excel returned no source table for the completed slicer."
+    End If
+    Set actualSheet = actualTable.Parent
+    Set expectedSheet = expectedTable.Parent
+    Set actualBook = actualSheet.Parent
+    Set expectedBook = expectedSheet.Parent
+    sourceContext = sourceContext & "; actual table=" & actualTable.Name & _
+        "; actual sheet=" & actualSheet.Name
+    ' Compare stable Excel identities instead of relying on COM object reference equality.
+    matches = (StrComp(actualBook.FullName, expectedBook.FullName, vbTextCompare) = 0)
+    matches = matches And (StrComp(actualSheet.Name, expectedSheet.Name, vbTextCompare) = 0)
+    matches = matches And (StrComp(actualTable.Name, expectedTable.Name, vbTextCompare) = 0)
+    matches = matches And (actualTable.Range.Address = expectedTable.Range.Address)
+    If Not matches Then
+        Err.Raise TOOL_ERROR + 98, METHOD_NAME, "The completed slicer is linked to a different table."
+    End If
+
+ExitPoint:
+    Set actualTable = Nothing
+    Set actualSheet = Nothing
+    Set expectedSheet = Nothing
+    Set actualBook = Nothing
+    Set expectedBook = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, sourceContext)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    None.
+' Returns:       None.
 ' Description:   Repair/test existing Dashboard controls without re-importing or exporting data.
 '-------------------------------------------------------------------------------
 Public Sub RebuildNeoControls()
@@ -771,7 +831,7 @@ ExitPoint:
     If cleanupFailed And errNumber = 0 Then errNumber = TOOL_ERROR + 101
     If completed And errNumber = 0 Then
         MsgBox "Kontrolki Dashboardu zostaly odtworzone. Dane i Done/Doubt pozostaly bez zmian.", _
-            vbInformation, "NeoAdvices - FIX01"
+            vbInformation, "NeoAdvices - FIX02"
     End If
     If errNumber <> 0 Then
         Call DisplayErrors
