@@ -196,7 +196,8 @@ End Function
 ' Description:   Delete non-owned table rows from bottom to top and validate retained ownership.
 '-------------------------------------------------------------------------------
 Public Sub TrimIndividualDashboard(ByVal wb As Workbook, ByVal accountantName As String, _
-                                   ByVal expectedCount As Long)
+                                   ByVal expectedCount As Long, _
+                                   Optional ByVal includeSources As Boolean = False)
     Const METHOD_NAME As String = "TrimIndividualDashboard"
     Dim ws As Worksheet
     Dim lo As ListObject
@@ -238,15 +239,7 @@ Public Sub TrimIndividualDashboard(ByVal wb As Workbook, ByVal accountantName As
     Call ApplyDataFormatting(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + actualCount, lo.ListColumns.Count, True)
     Call CreateDashboardControls(wb, True)
     wb.Names.Add Name:=COPY_MARKER, RefersTo:="=TRUE", Visible:=False
-    ws.Visible = xlSheetVisible
-    If INCLUDE_SOURCES_IN_ACCOUNTANT_FILES Then
-        wb.Worksheets(SHEET_NEO).Visible = xlSheetHidden
-        wb.Worksheets(SHEET_REPARTITION).Visible = xlSheetHidden
-    Else
-        If wb.Sheets.Count <> 1 Then
-            Err.Raise TOOL_ERROR + 102, METHOD_NAME, "Individual output must contain only Dashboard."
-        End If
-    End If
+    Call EnforceIndividualSheets(wb, includeSources)
 
 ExitPoint:
     Set lo = Nothing
@@ -273,7 +266,8 @@ End Sub
 '-------------------------------------------------------------------------------
 Private Sub SaveIndividualCopy(ByVal wbMaster As Workbook, ByVal filePath As String, _
                                ByVal accountantName As String, ByVal expectedCount As Long, _
-                               ByVal allocationDate As Date, ByVal runStamp As String)
+                               ByVal allocationDate As Date, ByVal runStamp As String, _
+                               ByVal includeSources As Boolean)
     Const METHOD_NAME As String = "SaveIndividualCopy"
     Dim wbIndividual As Workbook
     Dim fso As Object
@@ -294,10 +288,18 @@ Private Sub SaveIndividualCopy(ByVal wbMaster As Workbook, ByVal filePath As Str
     Set wbIndividual = Application.Workbooks.Open(Filename:=filePath, UpdateLinks:=0, ReadOnly:=False, _
         IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
     If wbIndividual.ReadOnly Then Err.Raise TOOL_ERROR + 57, METHOD_NAME, "Individual copy opened read-only."
-    Call TrimIndividualDashboard(wbIndividual, accountantName, expectedCount)
+    Call TrimIndividualDashboard(wbIndividual, accountantName, expectedCount, includeSources)
     Call WriteDashboardCaption(wbIndividual.Worksheets(SHEET_DASHBOARD), _
         allocationDate, runStamp, accountantName)
+    With wbIndividual.Worksheets(SHEET_DASHBOARD).Cells(10, 1)
+        If includeSources Then
+            .Value2 = CStr(.Value2) & " | UPDATE06 | Source sheets: YES"
+        Else
+            .Value2 = CStr(.Value2) & " | UPDATE06 | Source sheets: NO"
+        End If
+    End With
     Call RebindDashboardButtons(wbIndividual, wbIndividual.Name)
+    Call EnforceIndividualSheets(wbIndividual, includeSources)
     wbIndividual.Save
     wbIndividual.Close SaveChanges:=False
     Set wbIndividual = Nothing
@@ -338,6 +340,7 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
     Dim accountant As Variant
     Dim filePath As String
     Dim completed As Long
+    Dim includeSources As Boolean
     Dim wbTemplate As Workbook
     Dim wbSource As Workbook
     Dim templatePath As String
@@ -349,12 +352,13 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
+    includeSources = INCLUDE_SOURCES_IN_ACCOUNTANT_FILES
     Call CaptureExcelState(state)
     Application.DisplayAlerts = False
     Application.EnableEvents = False
     Application.AutomationSecurity = msoAutomationSecurityForceDisable
     Set wbSource = wbMaster
-    If counts.Count > 0 And Not INCLUDE_SOURCES_IN_ACCOUNTANT_FILES Then
+    If counts.Count > 0 And Not includeSources Then
         Application.StatusBar = "NeoAdvices: preparing Dashboard-only export template..."
         templatePath = UniqueOutputPath(folderPath, "NeoAdvices_TEMP_TEMPLATE_" & runStamp)
         wbMaster.SaveCopyAs templatePath
@@ -384,7 +388,7 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
         filePath = UniqueOutputPath(folderPath, _
             "NeoAdvices_" & CleanFileName(CStr(accountant)) & "_" & runStamp)
         Call SaveIndividualCopy(wbSource, filePath, CStr(accountant), _
-            CLng(counts(accountant)), allocationDate, runStamp)
+            CLng(counts(accountant)), allocationDate, runStamp, includeSources)
     Next accountant
 
 ExitPoint:
@@ -485,4 +489,64 @@ Private Sub DeleteExportTemplateSafe(ByVal filePath As String, ByRef hadFailure 
         hadFailure = True
         Call RecordError(CLASS_NAME, "DeleteExportTemplateSafe", cleanupNumber, cleanupDescription)
     End If
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Marked individual copy and the policy captured in the generating Master.
+' Returns:       None.
+' Description:   Enforce the source-sheet policy on every individual file before saving (UPDATE06).
+'-------------------------------------------------------------------------------
+Private Sub EnforceIndividualSheets(ByVal wb As Workbook, ByVal includeSources As Boolean)
+    Const METHOD_NAME As String = "EnforceIndividualSheets"
+    Dim ws As Worksheet
+    Dim sheetIndex As Long
+    Dim state As TExcelState
+    Dim cleanupFailed As Boolean
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Not HasCopyMarker(wb) Then
+        Err.Raise TOOL_ERROR + 110, METHOD_NAME, "Refusing to remove source sheets from an unmarked Master."
+    End If
+    Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
+    ws.Visible = xlSheetVisible
+    If includeSources Then
+        wb.Worksheets(SHEET_NEO).Visible = xlSheetHidden
+        wb.Worksheets(SHEET_REPARTITION).Visible = xlSheetHidden
+    Else
+        Call CaptureExcelState(state)
+        Application.DisplayAlerts = False
+        Application.EnableEvents = False
+        For sheetIndex = wb.Worksheets.Count To 1 Step -1
+            Select Case wb.Worksheets(sheetIndex).Name
+                Case SHEET_NEO, SHEET_REPARTITION
+                    wb.Worksheets(sheetIndex).Delete
+            End Select
+        Next sheetIndex
+        If wb.Sheets.Count <> 1 Then
+            Err.Raise TOOL_ERROR + 111, METHOD_NAME, "UPDATE06: individual file must contain only Dashboard."
+        End If
+    End If
+
+ExitPoint:
+    Call RestoreExcelStateSafe(state, cleanupFailed)
+    Set ws = Nothing
+    If cleanupFailed And errNumber = 0 Then
+        errNumber = TOOL_ERROR + 112
+        errDescription = "Could not restore Excel state after applying the source-sheet policy."
+    End If
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
 End Sub
