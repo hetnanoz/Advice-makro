@@ -152,6 +152,9 @@ Public Sub RunNeoAdvices()
     Set wbMaster = Application.ActiveWorkbook
     Call ResetErrors
     Call ValidateMaster(wbMaster)
+    ' User-requested persistent repair: start each run with Dashboard interaction enabled.
+    ' Capture this intended baseline before temporarily suspending events for processing.
+    Application.EnableEvents = True
     Call CaptureExcelState(state)
     neoPath = PickInputFile("Wybierz plik 1: NeoAdvices Export (.xlsx)")
     If Len(neoPath) > 0 Then
@@ -280,5 +283,4 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
-
 
