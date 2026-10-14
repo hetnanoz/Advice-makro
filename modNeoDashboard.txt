@@ -153,7 +153,7 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       None
-' Description:   Create four Master slicers or three individual slicers and five macro buttons.
+' Description:   Build native slicers and macro buttons without relying on active objects (FIX01).
 '-------------------------------------------------------------------------------
 Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boolean)
     Const METHOD_NAME As String = "CreateDashboardControls"
@@ -165,21 +165,23 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
     Dim fieldIndex As Long
     Dim buttonIndex As Long
     Dim itemIndex As Long
-    Dim cache As SlicerCache
-    Dim slicer As Slicer
     Dim button As Shape
     Dim leftPosition As Double
     Dim topPosition As Double
     Dim buttonWidth As Double
     Dim ownerMacro As String
     Dim lastButton As Long
+    Dim stepDescription As String
     Dim errNumber As Long
     Dim errDescription As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
+    stepDescription = "Resolve Dashboard table"
     Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
     Set lo = ws.ListObjects(TABLE_DASHBOARD)
+    stepDescription = "Remove old controls"
+    Call RemoveAllSlicerCaches(wb)
     For itemIndex = ws.Shapes.Count To 1 Step -1
         If Left$(ws.Shapes(itemIndex).Name, 7) = "btnNeo_" Then ws.Shapes(itemIndex).Delete
     Next itemIndex
@@ -189,11 +191,8 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
         fields = Array("Accountant", "KAG", "NAV Group", "NAV calculation")
     End If
     For fieldIndex = LBound(fields) To UBound(fields)
-        Set cache = wb.SlicerCaches.Add2(lo, CStr(fields(fieldIndex)), "scNeo_" & CStr(fieldIndex + 1))
-        Set slicer = cache.Slicers.Add(SlicerDestination:=ws, Name:="slNeo_" & CStr(fieldIndex + 1), _
-            Caption:=CStr(fields(fieldIndex)), Top:=4, Left:=6 + fieldIndex * 190, Width:=184, Height:=160)
-        slicer.NumberOfColumns = 1
-        slicer.Shape.Placement = xlFreeFloating
+        stepDescription = "Native slicer; field=" & CStr(fields(fieldIndex))
+        Call CreateNativeTableSlicer(wb, ws, lo, CStr(fields(fieldIndex)), 6 + fieldIndex * 190)
     Next fieldIndex
     captions = Array("ALL", "Cash", "SecCash", "Security", "SecCash + Security", "Import / Refresh")
     macroNames = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", _
@@ -203,20 +202,25 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
     leftPosition = 6
     topPosition = ws.Rows(9).Top + 1
     For buttonIndex = 0 To lastButton
+        stepDescription = "Create button " & CStr(captions(buttonIndex))
         buttonWidth = 104
         If buttonIndex = 4 Then buttonWidth = 170
         If buttonIndex = 5 Then buttonWidth = 132
         Set button = ws.Shapes.AddShape(msoShapeRoundedRectangle, leftPosition, topPosition, buttonWidth, 21)
         button.Name = "btnNeo_" & CStr(buttonIndex + 1)
-        button.TextFrame2.TextRange.Text = CStr(captions(buttonIndex))
-        button.TextFrame2.TextRange.Font.Size = 10
-        button.TextFrame2.TextRange.Font.Bold = msoTrue
-        button.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
-        button.TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
-        button.TextFrame2.VerticalAnchor = msoAnchorMiddle
+        stepDescription = "Format button " & CStr(captions(buttonIndex))
+        With button.TextFrame
+            .Characters.Text = CStr(captions(buttonIndex))
+            .Characters.Font.Size = 10
+            .Characters.Font.Bold = True
+            .Characters.Font.Color = RGB(255, 255, 255)
+            .HorizontalAlignment = xlHAlignCenter
+            .VerticalAlignment = xlVAlignCenter
+        End With
         button.Fill.ForeColor.RGB = RGB(31, 78, 121)
         button.Line.Visible = msoFalse
         button.Placement = xlFreeFloating
+        stepDescription = "Bind macro " & CStr(macroNames(buttonIndex))
         ownerMacro = "'" & Replace(wb.Name, "'", "''") & "'!" & CStr(macroNames(buttonIndex))
         button.OnAction = ownerMacro
         leftPosition = leftPosition + buttonWidth + 6
@@ -224,8 +228,6 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
 
 ExitPoint:
     Set button = Nothing
-    Set slicer = Nothing
-    Set cache = Nothing
     Set lo = Nothing
     Set ws = Nothing
     If errNumber <> 0 Then
@@ -236,10 +238,10 @@ ExitPoint:
 ErrHandler:
     errNumber = VBA.Err.Number
     errDescription = VBA.Err.Description
-    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        stepDescription)
     GoTo ExitPoint
 End Sub
-
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
@@ -560,4 +562,227 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Explicit workbook/table/field and the factory method to probe.
+' Returns:       A cache, or Nothing plus the preserved COM error.
+' Description:   Isolated compatibility probe; no forced names in the namespace.
+'-------------------------------------------------------------------------------
+Private Function TryTableSlicerCache(ByVal wb As Workbook, ByVal lo As ListObject, _
+                                     ByVal fieldName As String, ByVal legacyMethod As Boolean, _
+                                     ByRef failureNumber As Long, _
+                                     ByRef failureDescription As String) As SlicerCache
+    failureNumber = 0
+    failureDescription = vbNullString
+    On Error Resume Next
+    VBA.Err.Clear
+    If legacyMethod Then
+        Set TryTableSlicerCache = wb.SlicerCaches.Add(lo, fieldName)
+    Else
+        Set TryTableSlicerCache = wb.SlicerCaches.Add2(lo, fieldName)
+    End If
+    failureNumber = VBA.Err.Number
+    failureDescription = VBA.Err.Description
+    VBA.Err.Clear
+    On Error GoTo 0
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    A newly created cache, explicit destination and argument form.
+' Returns:       A slicer, or Nothing plus the preserved COM error.
+' Description:   Probe only the factory call; allow Excel to choose a unique name.
+'-------------------------------------------------------------------------------
+Private Function TryTableSlicer(ByVal cache As SlicerCache, ByVal ws As Worksheet, _
+                                ByVal useSheetName As Boolean, ByRef failureNumber As Long, _
+                                ByRef failureDescription As String) As Slicer
+    failureNumber = 0
+    failureDescription = vbNullString
+    On Error Resume Next
+    VBA.Err.Clear
+    If useSheetName Then
+        Set TryTableSlicer = cache.Slicers.Add(ws.Name)
+    Else
+        Set TryTableSlicer = cache.Slicers.Add(ws)
+    End If
+    failureNumber = VBA.Err.Number
+    failureDescription = VBA.Err.Description
+    VBA.Err.Clear
+    On Error GoTo 0
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Cache created by the current failed slicer operation only.
+' Returns:       None.
+' Description:   Isolated cleanup; preserve the original creation error.
+'-------------------------------------------------------------------------------
+Private Sub DeleteNewSlicerCacheSafe(ByRef cache As SlicerCache)
+    Dim cleanupNumber As Long
+    Dim cleanupDescription As String
+
+    On Error Resume Next
+    VBA.Err.Clear
+    If Not cache Is Nothing Then cache.Delete
+    cleanupNumber = VBA.Err.Number
+    cleanupDescription = VBA.Err.Description
+    VBA.Err.Clear
+    If cleanupNumber <> 0 Then
+        Call RecordError(CLASS_NAME, "DeleteNewSlicerCacheSafe", cleanupNumber, cleanupDescription)
+    End If
+    Set cache = Nothing
+    On Error GoTo 0
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Create one native slicer with compatible factory calls and stage-level diagnostics.
+'-------------------------------------------------------------------------------
+Private Sub CreateNativeTableSlicer(ByVal wb As Workbook, ByVal ws As Worksheet, _
+                                    ByVal lo As ListObject, ByVal fieldName As String, _
+                                    ByVal leftPosition As Double)
+    Const METHOD_NAME As String = "CreateNativeTableSlicer"
+    Dim cache As SlicerCache
+    Dim slicer As Slicer
+    Dim sourceTable As ListObject
+    Dim stepDescription As String
+    Dim firstFailure As String
+    Dim failureNumber As Long
+    Dim failureDescription As String
+    Dim completed As Boolean
+    Dim fieldIndex As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    stepDescription = "Validate field " & fieldName
+    fieldIndex = lo.ListColumns(fieldName).Index
+    fieldName = lo.ListColumns(fieldIndex).Name
+    If Not ws.Parent Is wb Then
+        Err.Raise TOOL_ERROR + 95, METHOD_NAME, "Slicer destination belongs to another workbook."
+    End If
+    If Not lo.Parent Is ws Then
+        Err.Raise TOOL_ERROR + 96, METHOD_NAME, "Slicer source table belongs to another worksheet."
+    End If
+    stepDescription = "Add2 cache; field=" & fieldName
+    Set cache = TryTableSlicerCache(wb, lo, fieldName, False, failureNumber, failureDescription)
+    If cache Is Nothing Then
+        If failureNumber = 5 Or failureNumber = 1004 Or failureNumber = 438 Then
+            firstFailure = "Add2 [" & CStr(failureNumber) & "]: " & failureDescription
+            stepDescription = "Add cache; field=" & fieldName
+            Set cache = TryTableSlicerCache(wb, lo, fieldName, True, failureNumber, failureDescription)
+        End If
+    End If
+    If cache Is Nothing Then
+        If failureNumber = 0 Then failureNumber = TOOL_ERROR + 97
+        If Len(failureDescription) = 0 Then failureDescription = "Excel returned no slicer cache."
+        Err.Raise failureNumber, METHOD_NAME, failureDescription
+    End If
+    stepDescription = "Validate cache source; field=" & fieldName
+    Set sourceTable = cache.ListObject
+    If Not sourceTable Is lo Then
+        Err.Raise TOOL_ERROR + 98, METHOD_NAME, "The slicer cache is not linked to tblDashboard."
+    End If
+    firstFailure = vbNullString
+    stepDescription = "Add slicer using worksheet object; field=" & fieldName
+    Set slicer = TryTableSlicer(cache, ws, False, failureNumber, failureDescription)
+    If slicer Is Nothing Then
+        If failureNumber = 5 Or failureNumber = 1004 Or failureNumber = 438 Then
+            firstFailure = "Worksheet argument [" & CStr(failureNumber) & "]: " & failureDescription
+            stepDescription = "Add slicer using sheet name; field=" & fieldName
+            Set slicer = TryTableSlicer(cache, ws, True, failureNumber, failureDescription)
+        End If
+    End If
+    If slicer Is Nothing Then
+        If failureNumber = 0 Then failureNumber = TOOL_ERROR + 99
+        If Len(failureDescription) = 0 Then failureDescription = "Excel returned no slicer control."
+        Err.Raise failureNumber, METHOD_NAME, failureDescription
+    End If
+    stepDescription = "Set caption; field=" & fieldName
+    slicer.Caption = fieldName
+    stepDescription = "Set layout; field=" & fieldName
+    slicer.Top = 4
+    slicer.Left = leftPosition
+    slicer.Width = 184
+    slicer.Height = 160
+    slicer.NumberOfColumns = 1
+    stepDescription = "Set placement; field=" & fieldName
+    slicer.Shape.Placement = xlFreeFloating
+    completed = True
+
+ExitPoint:
+    If Not completed Then Call DeleteNewSlicerCacheSafe(cache)
+    Set sourceTable = Nothing
+    Set slicer = Nothing
+    Set cache = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        stepDescription & "; " & firstFailure)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Repair/test existing Dashboard controls without re-importing or exporting data.
+'-------------------------------------------------------------------------------
+Public Sub RebuildNeoControls()
+    Const METHOD_NAME As String = "RebuildNeoControls"
+    Dim wb As Workbook
+    Dim state As TExcelState
+    Dim cleanupFailed As Boolean
+    Dim completed As Boolean
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wb = Application.ActiveWorkbook
+    Call ResetErrors
+    If wb Is Nothing Then Err.Raise TOOL_ERROR + 100, METHOD_NAME, "No active workbook."
+    Call CaptureExcelState(state)
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+    Call CreateDashboardControls(wb, HasCopyMarker(wb))
+    completed = True
+
+ExitPoint:
+    Call RestoreExcelStateSafe(state, cleanupFailed)
+    Set wb = Nothing
+    If cleanupFailed And errNumber = 0 Then errNumber = TOOL_ERROR + 101
+    If completed And errNumber = 0 Then
+        MsgBox "Kontrolki Dashboardu zostaly odtworzone. Dane i Done/Doubt pozostaly bez zmian.", _
+            vbInformation, "NeoAdvices - FIX01"
+    End If
+    If errNumber <> 0 Then
+        Call DisplayErrors
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
 
