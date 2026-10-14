@@ -83,6 +83,7 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
     wb.Worksheets(SHEET_NEO).Cells(1, 1).Resize(rowCount, UBound(enriched, 2)).Copy
     ws.Cells(DASH_HEADER_ROW, 3).PasteSpecial Paste:=xlPasteFormats
     Application.CutCopyMode = False
+    Call SortDashboardRows(lo)
     Call FormatHeader(lo.HeaderRowRange)
     Call ApplyDataFormatting(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
     Call FitDataColumns(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
@@ -126,7 +127,8 @@ Public Sub WriteDashboardCaption(ByVal ws As Worksheet, ByVal allocationDate As 
 
     With ws.Cells(10, 1)
         .Value2 = "NeoAdvices " & TOOL_VERSION & " | " & viewName & " | Allocation: " & _
-            Format$(allocationDate, "dd/mm/yyyy") & " | Run: " & runStamp & " | " & BatModeCaption()
+            Format$(allocationDate, "dd/mm/yyyy") & " | Run: " & runStamp & " | " & BatModeCaption() & _
+            " | Done / Doubt: double-click a box"
         .Font.Name = "Calibri"
         .Font.Size = 10
         .Font.Bold = True
@@ -153,7 +155,7 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       None
-' Description:   Build native slicers and macro buttons without relying on active objects (FIX04).
+' Description:   Build native slicers and macro buttons without relying on active objects (UPDATE05).
 '-------------------------------------------------------------------------------
 Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boolean)
     Const METHOD_NAME As String = "CreateDashboardControls"
@@ -186,9 +188,9 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
         If Left$(ws.Shapes(itemIndex).Name, 7) = "btnNeo_" Then ws.Shapes(itemIndex).Delete
     Next itemIndex
     If individual Then
-        fields = Array("KAG", "NAV Group", "NAV calculation")
+        fields = Array("KAG", "NAV Group", "NAV calculation", HDR_FUND)
     Else
-        fields = Array("Accountant", "KAG", "NAV Group", "NAV calculation")
+        fields = Array("Accountant", "KAG", "NAV Group", "NAV calculation", HDR_FUND)
     End If
     For fieldIndex = LBound(fields) To UBound(fields)
         stepDescription = "Native slicer; field=" & CStr(fields(fieldIndex))
@@ -538,7 +540,8 @@ Public Function HasExistingProgress(ByVal wb As Workbook) As Boolean
             If Not lo.DataBodyRange Is Nothing Then
                 values = lo.DataBodyRange.Columns(1).Resize(, 2).Value2
                 For rowIndex = 1 To UBound(values, 1)
-                    If Len(CleanText(values(rowIndex, 1))) > 0 Or Len(CleanText(values(rowIndex, 2))) > 0 Then
+                    If CleanText(values(rowIndex, 1)) = ChrW(&H2713) Or _
+                       CleanText(values(rowIndex, 2)) = "?" Then
                         HasExistingProgress = True
                         Exit For
                     End If
@@ -738,7 +741,7 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       None
-' Description:   Validate the table identity after the native slicer has been created (FIX04).
+' Description:   Validate the table identity after the native slicer has been created (UPDATE05).
 '-------------------------------------------------------------------------------
 Private Sub ValidateTableSlicerSource(ByVal cache As SlicerCache, ByVal expectedTable As ListObject)
     Const METHOD_NAME As String = "ValidateTableSlicerSource"
@@ -829,7 +832,7 @@ ExitPoint:
     If cleanupFailed And errNumber = 0 Then errNumber = TOOL_ERROR + 101
     If completed And errNumber = 0 Then
         MsgBox "Kontrolki Dashboardu zostaly odtworzone. Dane i Done/Doubt pozostaly bez zmian.", _
-            vbInformation, "NeoAdvices - FIX04"
+            vbInformation, "NeoAdvices - UPDATE05"
     End If
     If errNumber <> 0 Then
         Call DisplayErrors
@@ -844,3 +847,49 @@ ErrHandler:
 End Sub
 
 
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Complete Dashboard table, including Done and Doubt.
+' Returns:       None.
+' Description:   Keep funds together and sort ISINs ascending within each fund.
+'-------------------------------------------------------------------------------
+Public Sub SortDashboardRows(ByVal lo As ListObject)
+    Const METHOD_NAME As String = "SortDashboardRows"
+    Dim fundColumn As ListColumn
+    Dim isinColumn As ListColumn
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set fundColumn = lo.ListColumns(HDR_FUND)
+    Set isinColumn = lo.ListColumns(HDR_ISIN)
+    If lo.ListRows.Count > 1 Then
+        With lo.Sort
+            .SortFields.Clear
+            .SortFields.Add Key:=fundColumn.Range, SortOn:=xlSortOnValues, _
+                Order:=xlAscending, DataOption:=xlSortNormal
+            .SortFields.Add Key:=isinColumn.Range, SortOn:=xlSortOnValues, _
+                Order:=xlAscending, DataOption:=xlSortNormal
+            .Header = xlYes
+            .MatchCase = False
+            .Orientation = xlTopToBottom
+            .Apply
+        End With
+    End If
+
+ExitPoint:
+    Set fundColumn = Nothing
+    Set isinColumn = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
