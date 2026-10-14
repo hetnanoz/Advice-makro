@@ -46,18 +46,18 @@ Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean
                     rowIndex = Target.Row - lo.DataBodyRange.Row + 1
                     Set tableRow = lo.DataBodyRange.Rows(rowIndex)
                     If Target.Column = lo.ListColumns("Done").Range.Column Then
-                        If Len(CleanText(tableRow.Cells(1, 1).Value2)) = 0 Then
+                        If CleanText(tableRow.Cells(1, 1).Value2) <> ChrW(&H2713) Then
                             tableRow.Cells(1, 1).Value2 = ChrW(&H2713)
-                            tableRow.Cells(1, 2).ClearContents
+                            tableRow.Cells(1, 2).Value2 = ChrW(&H2610)
                         Else
-                            tableRow.Cells(1, 1).ClearContents
+                            tableRow.Cells(1, 1).Value2 = ChrW(&H2610)
                         End If
                     Else
-                        If Len(CleanText(tableRow.Cells(1, 2).Value2)) = 0 Then
+                        If CleanText(tableRow.Cells(1, 2).Value2) <> "?" Then
                             tableRow.Cells(1, 2).Value2 = "?"
-                            tableRow.Cells(1, 1).ClearContents
+                            tableRow.Cells(1, 1).Value2 = ChrW(&H2610)
                         Else
-                            tableRow.Cells(1, 2).ClearContents
+                            tableRow.Cells(1, 2).Value2 = ChrW(&H2610)
                         End If
                     End If
                     ' Formatting rules keep CANC above row fills and preserve movement fonts.
@@ -86,4 +86,5 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
+
 
