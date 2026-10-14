@@ -110,8 +110,8 @@ Public Function ChooseNeoStatus(ByVal wb As Workbook) As Long
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     pMenuChoice = -1
-    captions = Array("Done - zaznaczone widoczne wiersze", "Doubt - zaznaczone widoczne wiersze", _
-        "Wyczysc status - zaznaczone widoczne wiersze")
+    captions = Array("Done - selected visible rows", "Doubt - selected visible rows", _
+        "Clear status - selected visible rows")
     macros = Array("NeoMenuDone", "NeoMenuDoubt", "NeoMenuClear")
     Set popup = Application.CommandBars.Add(Position:=msoBarPopup, Temporary:=True)
     For index = 0 To 2
