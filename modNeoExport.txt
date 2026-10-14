@@ -293,9 +293,9 @@ Private Sub SaveIndividualCopy(ByVal wbMaster As Workbook, ByVal filePath As Str
         allocationDate, runStamp, accountantName)
     With wbIndividual.Worksheets(SHEET_DASHBOARD).Cells(10, 1)
         If includeSources Then
-            .Value2 = CStr(.Value2) & " | UPDATE07 | Source sheets: YES"
+            .Value2 = CStr(.Value2) & " | UPDATE08 | Source sheets: YES"
         Else
-            .Value2 = CStr(.Value2) & " | UPDATE07 | Source sheets: NO"
+            .Value2 = CStr(.Value2) & " | UPDATE08 | Source sheets: NO"
         End If
     End With
     Call RebindDashboardButtons(wbIndividual, wbIndividual.Name)
@@ -342,6 +342,7 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
     Dim completed As Long
     Dim includeSources As Boolean
     Dim wbTemplate As Workbook
+    Dim workerExcel As Excel.Application
     Dim wbSource As Workbook
     Dim templatePath As String
     Dim templateFolder As String
@@ -371,13 +372,20 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
         templateFolderCreated = True
         templatePath = UniqueOutputPath(templateFolder, "NeoAdvices_TEMP_TEMPLATE_" & runStamp)
         stepDescription = "1/6 - saving template in system TEMP folder"
-        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
+        Application.StatusBar = "NeoAdvices UPDATE08: " & stepDescription
         templateCreated = True
         wbMaster.SaveCopyAs templatePath
-        stepDescription = "2/6 - opening template"
-        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
-        Set wbTemplate = Application.Workbooks.Open(Filename:=templatePath, UpdateLinks:=0, _
+        stepDescription = "2/6 - opening template in isolated Excel instance"
+        Application.StatusBar = "NeoAdvices UPDATE08: " & stepDescription
+        Set workerExcel = CreateObject("Excel.Application")
+        workerExcel.Visible = False
+        workerExcel.DisplayAlerts = False
+        workerExcel.ScreenUpdating = False
+        workerExcel.EnableEvents = False
+        workerExcel.AutomationSecurity = msoAutomationSecurityForceDisable
+        Set wbTemplate = workerExcel.Workbooks.Open(Filename:=templatePath, UpdateLinks:=0, _
             ReadOnly:=False, IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+        workerExcel.Calculation = xlCalculationManual
         If wbTemplate.ReadOnly Then
             Err.Raise TOOL_ERROR + 103, METHOD_NAME, "Export template opened read-only."
         End If
@@ -387,26 +395,36 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
         ' Only the owned temporary copy loses source sheets. Dashboard and its event code remain.
         wbTemplate.Worksheets(SHEET_DASHBOARD).Visible = xlSheetVisible
         stepDescription = "3/6 - removing template slicer caches"
-        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
+        Application.StatusBar = "NeoAdvices UPDATE08: " & stepDescription
         Call RemoveAllSlicerCaches(wbTemplate)
         stepDescription = "4/6 - deleting both source sheets (calculation suspended)"
-        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
+        Application.StatusBar = "NeoAdvices UPDATE08: " & stepDescription
         wbTemplate.Worksheets(Array(SHEET_NEO, SHEET_REPARTITION)).Delete
         If wbTemplate.Sheets.Count <> 1 Then
             Err.Raise TOOL_ERROR + 105, METHOD_NAME, "Export template contains unexpected sheets."
         End If
         stepDescription = "5/6 - saving Dashboard-only template"
-        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
+        Application.StatusBar = "NeoAdvices UPDATE08: " & stepDescription
         wbTemplate.Save
+        Call CloseWorkbookSafe(wbTemplate, cleanupFailed)
+        Call QuitExportExcelSafe(workerExcel, cleanupFailed)
+        If cleanupFailed Then
+            Err.Raise TOOL_ERROR + 113, METHOD_NAME, "Could not close the isolated template editor."
+        End If
+        stepDescription = "6/6 - opening prepared Dashboard-only template"
+        Application.StatusBar = "NeoAdvices UPDATE08: " & stepDescription
+        Set wbTemplate = Application.Workbooks.Open(Filename:=templatePath, UpdateLinks:=0, _
+            ReadOnly:=False, IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+        If wbTemplate.Sheets.Count <> 1 Then
+            Err.Raise TOOL_ERROR + 114, METHOD_NAME, "Prepared template must contain only Dashboard."
+        End If
         Set wbSource = wbTemplate
-        stepDescription = "6/6 - restoring calculation mode"
-        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
         Application.Calculation = state.Calculation
     End If
     For Each accountant In counts.Keys
         completed = completed + 1
         stepDescription = "accountant file " & CStr(completed) & " / " & CStr(counts.Count)
-        Application.StatusBar = "NeoAdvices UPDATE07: " & stepDescription
+        Application.StatusBar = "NeoAdvices UPDATE08: " & stepDescription
         filePath = UniqueOutputPath(folderPath, _
             "NeoAdvices_" & CleanFileName(CStr(accountant)) & "_" & runStamp)
         Call SaveIndividualCopy(wbSource, filePath, CStr(accountant), _
@@ -416,6 +434,7 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
 ExitPoint:
     Set wbSource = Nothing
     Call CloseWorkbookSafe(wbTemplate, cleanupFailed)
+    Call QuitExportExcelSafe(workerExcel, cleanupFailed)
     If templateCreated Then
         If Not cleanupFailed Then Call DeleteExportTemplateSafe(templatePath, cleanupFailed)
     End If
@@ -601,5 +620,31 @@ Private Sub RemoveExportFolderSafe(ByVal folderPath As String, ByRef hadFailure 
     If cleanupNumber <> 0 Then
         hadFailure = True
         Call RecordError(CLASS_NAME, "RemoveExportFolderSafe", cleanupNumber, cleanupDescription)
+    End If
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Only the Excel instance created by this export, plus cumulative cleanup status.
+' Returns:       None.
+' Description:   Shut down the owned template editor without touching the user's Excel instance.
+'-------------------------------------------------------------------------------
+Private Sub QuitExportExcelSafe(ByRef workerExcel As Excel.Application, ByRef hadFailure As Boolean)
+    Dim cleanupNumber As Long
+    Dim cleanupDescription As String
+
+    On Error Resume Next
+    VBA.Err.Clear
+    If Not workerExcel Is Nothing Then workerExcel.Quit
+    cleanupNumber = VBA.Err.Number
+    cleanupDescription = VBA.Err.Description
+    VBA.Err.Clear
+    On Error GoTo 0
+    If cleanupNumber <> 0 Then
+        hadFailure = True
+        Call RecordError(CLASS_NAME, "QuitExportExcelSafe", cleanupNumber, cleanupDescription)
+    Else
+        Set workerExcel = Nothing
     End If
 End Sub
