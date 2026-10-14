@@ -3,6 +3,10 @@ Option Explicit
 Private Const CLASS_NAME As String = "modNeoConfig"
 
 Public Const DEV_MODE As Boolean = False
+' True keeps both full source sheets hidden in individual files.
+Public Const INCLUDE_SOURCES_IN_ACCOUNTANT_FILES As Boolean = False
+Public Const HDR_FUND As String = "Fund"
+Public Const HDR_ISIN As String = "29_AC_CA_ISIN"
 Public Const SHEET_DASHBOARD As String = "Dashboard"
 Public Const SHEET_NEO As String = "NeoAdvices"
 Public Const SHEET_REPARTITION As String = "Repartition"
