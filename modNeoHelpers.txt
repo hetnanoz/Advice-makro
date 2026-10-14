@@ -1,0 +1,668 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoHelpers"
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Capture the exact application state before any application mutation.
+'-------------------------------------------------------------------------------
+Public Sub CaptureExcelState(ByRef state As TExcelState)
+    Const METHOD_NAME As String = "CaptureExcelState"
+
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    state.ScreenUpdating = Application.ScreenUpdating
+    state.EnableEvents = Application.EnableEvents
+    state.DisplayAlerts = Application.DisplayAlerts
+    state.Calculation = Application.Calculation
+    state.StatusBar = Application.StatusBar
+    state.AutomationSecurity = Application.AutomationSecurity
+    state.EnableCancelKey = Application.EnableCancelKey
+    state.Captured = True
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Suspend expensive updates and suppress code in programmatically opened files.
+'-------------------------------------------------------------------------------
+Public Sub SuspendExcel()
+    Const METHOD_NAME As String = "SuspendExcel"
+
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+    Application.DisplayAlerts = False
+    Application.Calculation = xlCalculationManual
+    Application.AutomationSecurity = msoAutomationSecurityForceDisable
+    Application.EnableCancelKey = xlErrorHandler
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Previously captured state; hadFailure is set if restoration fails.
+' Returns:       None.
+' Description:   Isolated cleanup; attempt every restoration even after failure.
+'-------------------------------------------------------------------------------
+Public Sub RestoreExcelStateSafe(ByRef state As TExcelState, ByRef hadFailure As Boolean)
+    Dim stepIndex As Long
+    Dim cleanupNumber As Long
+    Dim cleanupDescription As String
+
+    If state.Captured Then
+        On Error Resume Next
+        For stepIndex = 1 To 8
+            VBA.Err.Clear
+            Select Case stepIndex
+                Case 1: Application.AutomationSecurity = state.AutomationSecurity
+                Case 2: Application.Calculation = state.Calculation
+                Case 3: Application.DisplayAlerts = state.DisplayAlerts
+                Case 4: Application.StatusBar = state.StatusBar
+                Case 5: Application.ScreenUpdating = state.ScreenUpdating
+                Case 6: Application.EnableEvents = state.EnableEvents
+                Case 7: Application.EnableCancelKey = state.EnableCancelKey
+                Case 8: Application.CutCopyMode = False
+            End Select
+            cleanupNumber = VBA.Err.Number
+            cleanupDescription = VBA.Err.Description
+            VBA.Err.Clear
+            If cleanupNumber <> 0 Then
+                hadFailure = True
+                Call RecordError(CLASS_NAME, "RestoreExcelStateSafe", _
+                    cleanupNumber, cleanupDescription)
+            End If
+        Next stepIndex
+        On Error GoTo 0
+    End If
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Temporary workbook opened by this tool, and cleanup status.
+' Returns:       None.
+' Description:   Close only owned workbooks; never hide the caller's error.
+'-------------------------------------------------------------------------------
+Public Sub CloseWorkbookSafe(ByRef wb As Workbook, ByRef hadFailure As Boolean)
+    Dim cleanupNumber As Long
+    Dim cleanupDescription As String
+
+    On Error Resume Next
+    VBA.Err.Clear
+    If Not wb Is Nothing Then wb.Close SaveChanges:=False
+    cleanupNumber = VBA.Err.Number
+    cleanupDescription = VBA.Err.Description
+    VBA.Err.Clear
+    If cleanupNumber <> 0 Then
+        hadFailure = True
+        Call RecordError(CLASS_NAME, "CloseWorkbookSafe", cleanupNumber, cleanupDescription)
+    Else
+        Set wb = Nothing
+    End If
+    On Error GoTo 0
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    An exact, newly-created temporary output path.
+' Returns:       None.
+' Description:   Delete only this run's incomplete staging file after a failure.
+'-------------------------------------------------------------------------------
+Public Sub DeleteFileSafe(ByVal filePath As String)
+    Dim fso As Object
+    Dim cleanupNumber As Long
+    Dim cleanupDescription As String
+
+    On Error Resume Next
+    VBA.Err.Clear
+    If Len(filePath) > 0 Then
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        If fso.FileExists(filePath) Then fso.DeleteFile filePath, False
+    End If
+    cleanupNumber = VBA.Err.Number
+    cleanupDescription = VBA.Err.Description
+    VBA.Err.Clear
+    If cleanupNumber <> 0 Then
+        Call RecordError(CLASS_NAME, "DeleteFileSafe", cleanupNumber, cleanupDescription)
+    End If
+    Set fso = Nothing
+    On Error GoTo 0
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Worksheet
+' Description:   Resolve a worksheet without relying on the active worksheet.
+'-------------------------------------------------------------------------------
+Public Function RequiredSheet(ByVal wb As Workbook, ByVal sheetName As String) As Worksheet
+    Const METHOD_NAME As String = "RequiredSheet"
+    Dim ws As Worksheet
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For Each ws In wb.Worksheets
+        If StrComp(ws.Name, sheetName, vbBinaryCompare) = 0 Then
+            Set RequiredSheet = ws
+            Exit For
+        End If
+    Next ws
+    If RequiredSheet Is Nothing Then
+        Err.Raise TOOL_ERROR + 1, METHOD_NAME, "Required worksheet missing: " & sheetName
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Find actual data bounds instead of importing a format-inflated UsedRange.
+'-------------------------------------------------------------------------------
+Public Sub GetDataBounds(ByVal ws As Worksheet, ByRef lastRow As Long, ByRef lastColumn As Long)
+    Const METHOD_NAME As String = "GetDataBounds"
+    Dim found As Range
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    lastRow = 0
+    lastColumn = 0
+    Set found = ws.Cells.Find(What:="*", After:=ws.Cells(1, 1), LookIn:=xlFormulas, _
+        LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, _
+        MatchCase:=False, SearchFormat:=False)
+    If Not found Is Nothing Then
+        lastRow = found.Row
+        Set found = ws.Cells.Find(What:="*", After:=ws.Cells(1, 1), LookIn:=xlFormulas, _
+            LookAt:=xlPart, SearchOrder:=xlByColumns, SearchDirection:=xlPrevious, _
+            MatchCase:=False, SearchFormat:=False)
+        lastColumn = found.Column
+    End If
+
+ExitPoint:
+    Set found = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Long
+' Description:   Resolve an exact header and reject absent or ambiguous required columns.
+'-------------------------------------------------------------------------------
+Public Function GetColumnIndexByHeader(ByVal ws As Worksheet, ByVal headerRow As Long, _
+                                       ByVal headerName As String) As Long
+    Const METHOD_NAME As String = "GetColumnIndexByHeader"
+    Dim lastRow As Long
+    Dim lastColumn As Long
+    Dim columnIndex As Long
+    Dim headerValue As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call GetDataBounds(ws, lastRow, lastColumn)
+    For columnIndex = 1 To lastColumn
+        headerValue = ws.Cells(headerRow, columnIndex).Value2
+        If Not IsError(headerValue) Then
+            If StrComp(CStr(headerValue), headerName, vbBinaryCompare) = 0 Then
+                If GetColumnIndexByHeader <> 0 Then
+                    Err.Raise TOOL_ERROR + 2, METHOD_NAME, "Duplicate required header: " & headerName
+                End If
+                GetColumnIndexByHeader = columnIndex
+            End If
+        End If
+    Next columnIndex
+    If GetColumnIndexByHeader = 0 Then
+        Err.Raise TOOL_ERROR + 3, METHOD_NAME, "Required header missing: " & headerName
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       String
+' Description:   Normalize whitespace in account keys, names and category values.
+'-------------------------------------------------------------------------------
+Public Function CleanText(ByVal value As Variant) As String
+    Const METHOD_NAME As String = "CleanText"
+
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(value) Then
+        Err.Raise TOOL_ERROR + 4, METHOD_NAME, "An Excel error exists in a required input field."
+    End If
+    If Not IsNull(value) Then
+        CleanText = Trim$(Replace(CStr(value), ChrW(160), " "))
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Variant
+' Description:   Convert strict English numeric text; preserve existing numbers and empty cells.
+'-------------------------------------------------------------------------------
+Public Function ParseEnglishNumber(ByVal value As Variant) As Variant
+    Const METHOD_NAME As String = "ParseEnglishNumber"
+    Dim textValue As String
+    Dim unsignedValue As String
+    Dim integerPart As String
+    Dim parts As Variant
+    Dim groups As Variant
+    Dim partIndex As Long
+    Dim decimalMark As String
+    Dim converted As Double
+    Dim significantText As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If IsError(value) Or IsNull(value) Then
+        Err.Raise TOOL_ERROR + 5, METHOD_NAME, "Invalid numeric input: Excel error or Null."
+    End If
+    Select Case VarType(value)
+        Case vbEmpty
+            ParseEnglishNumber = Empty
+        Case vbByte, vbInteger, vbLong, vbSingle, vbDouble, vbCurrency, vbDecimal
+            ParseEnglishNumber = CDbl(value)
+        Case vbString
+            textValue = Trim$(Replace(CStr(value), ChrW(160), " "))
+            If Len(textValue) = 0 Then
+                ParseEnglishNumber = Empty
+            Else
+                unsignedValue = textValue
+                If Left$(unsignedValue, 1) = "-" Or Left$(unsignedValue, 1) = "+" Then
+                    unsignedValue = Mid$(unsignedValue, 2)
+                End If
+                If Len(unsignedValue) = 0 Then
+                    Err.Raise TOOL_ERROR + 6, METHOD_NAME, "Numeric text has no digits."
+                End If
+                If unsignedValue Like "*[!0-9,.]*" Then
+                    Err.Raise TOOL_ERROR + 7, METHOD_NAME, "Unsupported characters in numeric text."
+                End If
+                parts = Split(unsignedValue, ".")
+                If UBound(parts) > 1 Then
+                    Err.Raise TOOL_ERROR + 8, METHOD_NAME, "Multiple decimal points in numeric text."
+                End If
+                integerPart = CStr(parts(0))
+                If Len(integerPart) = 0 Then
+                    Err.Raise TOOL_ERROR + 9, METHOD_NAME, "Numeric text is missing its integer part."
+                End If
+                groups = Split(integerPart, ",")
+                If UBound(groups) > 0 Then
+                    If Len(groups(0)) < 1 Or Len(groups(0)) > 3 Then
+                        Err.Raise TOOL_ERROR + 10, METHOD_NAME, "Invalid thousands grouping."
+                    End If
+                    For partIndex = 1 To UBound(groups)
+                        If Len(groups(partIndex)) <> 3 Then
+                            Err.Raise TOOL_ERROR + 10, METHOD_NAME, "Invalid thousands grouping."
+                        End If
+                    Next partIndex
+                End If
+                If UBound(parts) = 1 Then
+                    If Len(parts(1)) = 0 Or InStr(1, parts(1), ",", vbBinaryCompare) > 0 Then
+                        Err.Raise TOOL_ERROR + 11, METHOD_NAME, "Invalid decimal fraction."
+                    End If
+                End If
+                significantText = Replace(unsignedValue, ",", vbNullString)
+                If InStr(1, significantText, ".", vbBinaryCompare) > 0 Then
+                    Do While Right$(significantText, 1) = "0"
+                        significantText = Left$(significantText, Len(significantText) - 1)
+                    Loop
+                End If
+                significantText = Replace(significantText, ".", vbNullString)
+                Do While Len(significantText) > 0
+                    If Left$(significantText, 1) <> "0" Then Exit Do
+                    significantText = Mid$(significantText, 2)
+                Loop
+                If Len(significantText) > 15 Then
+                    Err.Raise TOOL_ERROR + 17, METHOD_NAME, _
+                        "Numeric text exceeds Excel's 15 significant-digit precision."
+                End If
+                textValue = Replace(textValue, ",", vbNullString)
+                ' CDbl follows the VBA/Windows locale, even if Excel uses custom separators.
+                decimalMark = Mid$(CStr(1.5), 2, 1)
+                converted = CDbl(Replace(textValue, ".", decimalMark))
+                ParseEnglishNumber = converted
+            End If
+        Case Else
+            Err.Raise TOOL_ERROR + 12, METHOD_NAME, "Unsupported numeric input type."
+    End Select
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Date
+' Description:   Parse actual Excel dates or unambiguous dd/mm/yyyy allocation headers.
+'-------------------------------------------------------------------------------
+Public Function ReadAllocationDate(ByVal value As Variant, ByVal date1904 As Boolean) As Date
+    Const METHOD_NAME As String = "ReadAllocationDate"
+    Dim textValue As String
+    Dim parts As Variant
+    Dim parsedDate As Date
+    Dim dayValue As Long
+    Dim monthValue As Long
+    Dim yearValue As Long
+    Dim serialValue As Double
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If VarType(value) = vbDate Then
+        ReadAllocationDate = DateValue(CDate(value))
+    ElseIf VarType(value) <> vbString And IsNumeric(value) Then
+        serialValue = CDbl(value)
+        If serialValue <= 0 Or serialValue <> Fix(serialValue) Then
+            Err.Raise TOOL_ERROR + 13, METHOD_NAME, "Invalid allocation date serial."
+        End If
+        If date1904 Then
+            parsedDate = DateSerial(1904, 1, 1) + serialValue
+        Else
+            parsedDate = DateSerial(1899, 12, 30) + serialValue
+        End If
+        ReadAllocationDate = parsedDate
+    Else
+        textValue = CleanText(value)
+        parts = Split(textValue, "/")
+        If UBound(parts) <> 2 Then
+            Err.Raise TOOL_ERROR + 14, METHOD_NAME, "Allocation text date must use dd/mm/yyyy."
+        End If
+        If Len(parts(2)) <> 4 Then
+            Err.Raise TOOL_ERROR + 14, METHOD_NAME, "Allocation year must contain four digits."
+        End If
+        If parts(0) Like "*[!0-9]*" Or parts(1) Like "*[!0-9]*" Or parts(2) Like "*[!0-9]*" Then
+            Err.Raise TOOL_ERROR + 14, METHOD_NAME, "Invalid allocation text date."
+        End If
+        dayValue = CLng(parts(0))
+        monthValue = CLng(parts(1))
+        yearValue = CLng(parts(2))
+        parsedDate = DateSerial(yearValue, monthValue, dayValue)
+        If Day(parsedDate) <> dayValue Or Month(parsedDate) <> monthValue Or _
+           Year(parsedDate) <> yearValue Then
+            Err.Raise TOOL_ERROR + 15, METHOD_NAME, "Allocation date does not exist."
+        End If
+        ReadAllocationDate = parsedDate
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       String
+' Description:   Create a safe accountant filename component; collisions are handled separately.
+'-------------------------------------------------------------------------------
+Public Function CleanFileName(ByVal accountantName As String) As String
+    Const METHOD_NAME As String = "CleanFileName"
+    Dim result As String
+    Dim character As String
+    Dim characterIndex As Long
+    Dim characterCode As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For characterIndex = 1 To Len(accountantName)
+        character = Mid$(accountantName, characterIndex, 1)
+        characterCode = AscW(character)
+        If characterCode >= 0 And characterCode < 32 Then
+            result = result & "_"
+        ElseIf InStr(1, "<>:""/\|?*", character, vbBinaryCompare) > 0 Then
+            result = result & "_"
+        Else
+            result = result & character
+        End If
+    Next characterIndex
+    result = Left$(Trim$(result), 70)
+    Do While Len(result) > 0
+        If Right$(result, 1) = "." Or Right$(result, 1) = " " Then
+            result = Left$(result, Len(result) - 1)
+        Else
+            Exit Do
+        End If
+    Loop
+    If Len(result) = 0 Then result = UNASSIGNED_NAME
+    CleanFileName = result
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Boolean
+' Description:   Distinguish individual workbooks from the Master without inspecting VBA.
+'-------------------------------------------------------------------------------
+Public Function HasCopyMarker(ByVal wb As Workbook) As Boolean
+    Const METHOD_NAME As String = "HasCopyMarker"
+    Dim item As Name
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For Each item In wb.Names
+        If StrComp(item.Name, COPY_MARKER, vbTextCompare) = 0 Then
+            HasCopyMarker = True
+            Exit For
+        End If
+    Next item
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Avoid closing or modifying a workbook already owned by the user.
+'-------------------------------------------------------------------------------
+Public Sub RequireClosedPath(ByVal filePath As String)
+    Const METHOD_NAME As String = "RequireClosedPath"
+    Dim wb As Workbook
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For Each wb In Application.Workbooks
+        If StrComp(wb.FullName, filePath, vbTextCompare) = 0 Then
+            Err.Raise TOOL_ERROR + 16, METHOD_NAME, _
+                "The selected input is already open. Close it and run the process again."
+        End If
+    Next wb
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Original event state and cleanup failure flag.
+' Returns:       None.
+' Description:   Isolated event cleanup without changing calculation or alerts.
+'-------------------------------------------------------------------------------
+Public Sub RestoreEventsSafe(ByVal previousEvents As Boolean, ByRef hadFailure As Boolean)
+    Dim cleanupNumber As Long
+    Dim cleanupDescription As String
+
+    On Error Resume Next
+    VBA.Err.Clear
+    Application.EnableEvents = previousEvents
+    cleanupNumber = VBA.Err.Number
+    cleanupDescription = VBA.Err.Description
+    VBA.Err.Clear
+    If cleanupNumber <> 0 Then
+        hadFailure = True
+        Call RecordError(CLASS_NAME, "RestoreEventsSafe", cleanupNumber, cleanupDescription)
+    End If
+    On Error GoTo 0
+End Sub
+

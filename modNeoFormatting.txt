@@ -1,0 +1,311 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoFormatting"
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Clear existing content and objects while preserving the worksheet and its code.
+'-------------------------------------------------------------------------------
+Public Sub ClearWorksheetView(ByVal ws As Worksheet)
+    Const METHOD_NAME As String = "ClearWorksheetView"
+    Dim itemIndex As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For itemIndex = ws.ListObjects.Count To 1 Step -1
+        ws.ListObjects(itemIndex).Unlist
+    Next itemIndex
+    If ws.AutoFilterMode Then ws.AutoFilterMode = False
+    For itemIndex = ws.Shapes.Count To 1 Step -1
+        ws.Shapes(itemIndex).Delete
+    Next itemIndex
+    ws.UsedRange.UnMerge
+    ws.Cells.Clear
+    ws.Rows.Hidden = False
+    ws.Columns.Hidden = False
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Add a font-only movement rule that can coexist with row background rules.
+'-------------------------------------------------------------------------------
+Private Sub AddFontRule(ByVal target As Range, ByVal formula As String, ByVal color As Long)
+    Const METHOD_NAME As String = "AddFontRule"
+    Dim rule As FormatCondition
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set rule = target.FormatConditions.Add(Type:=xlExpression, Formula1:=formula)
+    rule.Font.Bold = True
+    rule.Font.Color = color
+    rule.StopIfTrue = False
+
+ExitPoint:
+    Set rule = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Add a background-only rule without changing movement font colors.
+'-------------------------------------------------------------------------------
+Private Sub AddFillRule(ByVal target As Range, ByVal formula As String, ByVal color As Long)
+    Const METHOD_NAME As String = "AddFillRule"
+    Dim rule As FormatCondition
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set rule = target.FormatConditions.Add(Type:=xlExpression, Formula1:=formula)
+    rule.Interior.Color = color
+    rule.StopIfTrue = False
+
+ExitPoint:
+    Set rule = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Apply numeric, row-status, movement-font and highest-priority CANC rules.
+'-------------------------------------------------------------------------------
+Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
+                               ByVal lastRow As Long, ByVal lastColumn As Long, _
+                               ByVal isDashboard As Boolean)
+    Const METHOD_NAME As String = "ApplyDataFormatting"
+    Dim body As Range
+    Dim amounts As Range
+    Dim statusRange As Range
+    Dim rule As FormatCondition
+    Dim firstRow As Long
+    Dim groupIndex As Long
+    Dim statusIndex As Long
+    Dim codeIndex As Long
+    Dim quantityIndex As Long
+    Dim numericHeaders As Variant
+    Dim header As Variant
+    Dim codeAddress As String
+    Dim amountAddress As String
+    Dim statusAddress As String
+    Dim groupAddress As String
+    Dim doneAddress As String
+    Dim doubtAddress As String
+    Dim formula As String
+    Dim pairIndex As Long
+    Dim movementCodes As Variant
+    Dim movementAmounts As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    firstRow = headerRow + 1
+    If lastRow >= firstRow Then
+        Set body = ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, lastColumn))
+        body.FormatConditions.Delete
+        body.Interior.Color = RGB(255, 255, 255)
+        body.Font.Color = RGB(0, 0, 0)
+        body.Font.Bold = False
+        body.Font.Name = "Calibri"
+        body.Font.Size = 11
+        body.Borders.LineStyle = xlContinuous
+        body.Borders.Weight = xlHairline
+        body.Borders.Color = RGB(217, 217, 217)
+        numericHeaders = Array(HDR_QUANTITY, HDR_SEC_QUANTITY, HDR_CASH_AMOUNT)
+        For Each header In numericHeaders
+            quantityIndex = GetColumnIndexByHeader(ws, headerRow, CStr(header))
+            ws.Range(ws.Cells(firstRow, quantityIndex), ws.Cells(lastRow, quantityIndex)).NumberFormat = _
+                NUMBER_DISPLAY
+        Next header
+        If isDashboard Then
+            groupIndex = GetColumnIndexByHeader(ws, headerRow, HDR_GROUP)
+            groupAddress = ws.Cells(firstRow, groupIndex).Address(False, True)
+            doneAddress = ws.Cells(firstRow, 1).Address(False, True)
+            doubtAddress = ws.Cells(firstRow, 2).Address(False, True)
+            formula = "=(" & doneAddress & "="""")*(" & doubtAddress & "="""")*(" & _
+                groupAddress & "=""Cash"")"
+            Call AddFillRule(body, formula, RGB(230, 240, 255))
+            Call AddFillRule(body, "=" & doubtAddress & "=""?""", RGB(255, 217, 179))
+            Call AddFillRule(body, "=" & doneAddress & "=""" & ChrW(&H2713) & """", RGB(198, 239, 206))
+            ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)).Font.Bold = True
+            ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)).Font.Name = "Segoe UI Symbol"
+            ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)).HorizontalAlignment = xlCenter
+        End If
+        movementCodes = Array(HDR_SEC_CODE, HDR_CASH_CODE)
+        movementAmounts = Array(HDR_SEC_QUANTITY, HDR_CASH_AMOUNT)
+        For pairIndex = 0 To 1
+            codeIndex = GetColumnIndexByHeader(ws, headerRow, CStr(movementCodes(pairIndex)))
+            quantityIndex = GetColumnIndexByHeader(ws, headerRow, CStr(movementAmounts(pairIndex)))
+            codeAddress = ws.Cells(firstRow, codeIndex).Address(False, True)
+            amountAddress = ws.Cells(firstRow, quantityIndex).Address(False, True)
+            Set amounts = ws.Range(ws.Cells(firstRow, quantityIndex), ws.Cells(lastRow, quantityIndex))
+            formula = "=(" & codeAddress & "=""CRED"")*(" & amountAddress & "<>"""")"
+            Call AddFontRule(amounts, formula, RGB(0, 100, 0))
+            formula = "=(" & codeAddress & "=""DEBT"")*(" & amountAddress & "<>"""")"
+            Call AddFontRule(amounts, formula, RGB(192, 0, 0))
+        Next pairIndex
+        statusIndex = GetColumnIndexByHeader(ws, headerRow, HDR_STATUS)
+        Set statusRange = ws.Range(ws.Cells(firstRow, statusIndex), ws.Cells(lastRow, statusIndex))
+        statusAddress = ws.Cells(firstRow, statusIndex).Address(False, True)
+        Set rule = statusRange.FormatConditions.Add(Type:=xlExpression, _
+            Formula1:="=" & statusAddress & "=""CANC""")
+        rule.Interior.Color = RGB(255, 199, 206)
+        rule.Font.Color = RGB(156, 0, 6)
+        rule.SetFirstPriority
+        rule.StopIfTrue = True
+    End If
+
+ExitPoint:
+    Set rule = Nothing
+    Set statusRange = Nothing
+    Set amounts = Nothing
+    Set body = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Apply a readable fixed header appearance without a banded table style.
+'-------------------------------------------------------------------------------
+Public Sub FormatHeader(ByVal target As Range)
+    Const METHOD_NAME As String = "FormatHeader"
+
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    target.Font.Name = "Calibri"
+    target.Font.Size = 11
+    target.Font.Bold = True
+    target.Font.Color = RGB(255, 255, 255)
+    target.Interior.Color = RGB(31, 55, 79)
+    target.WrapText = True
+    target.VerticalAlignment = xlCenter
+    target.RowHeight = 46
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Fit text sensibly while reserving sufficient width for numeric values.
+'-------------------------------------------------------------------------------
+Public Sub FitDataColumns(ByVal ws As Worksheet, ByVal headerRow As Long, _
+                          ByVal lastRow As Long, ByVal lastColumn As Long, ByVal isDashboard As Boolean)
+    Const METHOD_NAME As String = "FitDataColumns"
+    Dim columnIndex As Long
+    Dim width As Double
+    Dim numericHeaders As Variant
+    Dim header As Variant
+    Dim numericIndex As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    ws.Range(ws.Cells(headerRow, 1), ws.Cells(lastRow, lastColumn)).Columns.AutoFit
+    For columnIndex = 1 To lastColumn
+        width = ws.Columns(columnIndex).ColumnWidth + 2
+        If width > 30 Then width = 30
+        If width < 10 Then width = 10
+        ws.Columns(columnIndex).ColumnWidth = width
+    Next columnIndex
+    numericHeaders = Array(HDR_QUANTITY, HDR_SEC_QUANTITY, HDR_CASH_AMOUNT)
+    For Each header In numericHeaders
+        numericIndex = GetColumnIndexByHeader(ws, headerRow, CStr(header))
+        ws.Columns(numericIndex).ColumnWidth = 24
+    Next header
+    If isDashboard Then ws.Columns("A:B").ColumnWidth = 7
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+

@@ -1,0 +1,39 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoConfig"
+
+Public Const DEV_MODE As Boolean = False
+Public Const SHEET_DASHBOARD As String = "Dashboard"
+Public Const SHEET_NEO As String = "NeoAdvices"
+Public Const SHEET_REPARTITION As String = "Repartition"
+Public Const TABLE_DASHBOARD As String = "tblDashboard"
+Public Const DASH_HEADER_ROW As Long = 11
+Public Const REP_HEADER_ROW As Long = 4
+Public Const REP_DATE_ROW As Long = 3
+Public Const ADDED_COLUMNS As Long = 7
+Public Const HDR_ACCOUNTANT As String = "Accountant"
+Public Const HDR_GROUP As String = "Type Group"
+Public Const HDR_KEY As String = "2_B_GL_Sec Acc"
+Public Const HDR_QUANTITY As String = "33_AG_CA_Quant"
+Public Const HDR_SEC_CODE As String = "123_DS_SM_Sec Movem Code"
+Public Const HDR_SEC_QUANTITY As String = "127_DW_SM_Posting Quant"
+Public Const HDR_CASH_CODE As String = "146_EP_CM_Cash Movem Code"
+Public Const HDR_CASH_AMOUNT As String = "152_EV_CM_Posting Amount"
+Public Const HDR_STATUS As String = "17_Q_GL_Status Code"
+Public Const UNASSIGNED_NAME As String = "UNASSIGNED"
+Public Const NUMBER_DISPLAY As String = "0.00###"
+Public Const COPY_MARKER As String = "_NeoAdviceIndividual"
+Public Const TOOL_VERSION As String = "1.0.0"
+Public Const TOOL_ERROR As Long = vbObjectError + 2400
+
+Public Type TExcelState
+    Captured As Boolean
+    ScreenUpdating As Boolean
+    EnableEvents As Boolean
+    DisplayAlerts As Boolean
+    Calculation As XlCalculation
+    StatusBar As Variant
+    AutomationSecurity As Long
+    EnableCancelKey As XlEnableCancelKey
+End Type
+

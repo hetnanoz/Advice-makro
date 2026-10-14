@@ -1,0 +1,89 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "Dashboard_Sheet"
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Toggle one pseudo-checkbox inside the data body of tblDashboard.
+'-------------------------------------------------------------------------------
+Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
+    Const METHOD_NAME As String = "Worksheet_BeforeDoubleClick"
+    Dim lo As ListObject
+    Dim candidate As ListObject
+    Dim statusCells As Range
+    Dim hit As Range
+    Dim tableRow As Range
+    Dim rowIndex As Long
+    Dim previousEvents As Boolean
+    Dim stateCaptured As Boolean
+    Dim cleanupFailed As Boolean
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call ResetErrors
+    If Target.CountLarge = 1 Then
+        For Each candidate In Me.ListObjects
+            If candidate.Name = TABLE_DASHBOARD Then
+                Set lo = candidate
+                Exit For
+            End If
+        Next candidate
+        If Not lo Is Nothing Then
+            If Not lo.DataBodyRange Is Nothing Then
+                Set statusCells = lo.DataBodyRange.Columns(1).Resize(, 2)
+                Set hit = Application.Intersect(Target, statusCells)
+                If Not hit Is Nothing Then
+                    Cancel = True
+                    previousEvents = Application.EnableEvents
+                    stateCaptured = True
+                    Application.EnableEvents = False
+                    rowIndex = Target.Row - lo.DataBodyRange.Row + 1
+                    Set tableRow = lo.DataBodyRange.Rows(rowIndex)
+                    If Target.Column = lo.ListColumns("Done").Range.Column Then
+                        If Len(CleanText(tableRow.Cells(1, 1).Value2)) = 0 Then
+                            tableRow.Cells(1, 1).Value2 = ChrW(&H2713)
+                            tableRow.Cells(1, 2).ClearContents
+                        Else
+                            tableRow.Cells(1, 1).ClearContents
+                        End If
+                    Else
+                        If Len(CleanText(tableRow.Cells(1, 2).Value2)) = 0 Then
+                            tableRow.Cells(1, 2).Value2 = "?"
+                            tableRow.Cells(1, 1).ClearContents
+                        Else
+                            tableRow.Cells(1, 2).ClearContents
+                        End If
+                    End If
+                    ' Formatting rules keep CANC above row fills and preserve movement fonts.
+                    Me.Calculate
+                End If
+            End If
+        End If
+    End If
+
+ExitPoint:
+    If stateCaptured Then Call RestoreEventsSafe(previousEvents, cleanupFailed)
+    Set tableRow = Nothing
+    Set hit = Nothing
+    Set statusCells = Nothing
+    Set lo = Nothing
+    Set candidate = Nothing
+    If cleanupFailed And errNumber = 0 Then errNumber = TOOL_ERROR + 42
+    If errNumber <> 0 Then
+        Call DisplayErrors
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+

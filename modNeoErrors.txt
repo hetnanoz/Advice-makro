@@ -1,0 +1,116 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoErrors"
+
+' Change this LOCAL conditional-compilation constant to True for corporate BAT.
+' A runtime Boolean would still require the compiler to resolve ErrorManager.
+#Const BAT_CORE_ENABLED = False
+Private errorTrace As String
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    None.
+' Returns:       None.
+' Description:   Reset the temporary user-facing error trace at an entry point.
+'-------------------------------------------------------------------------------
+Public Sub ResetErrors()
+    errorTrace = vbNullString
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    Preserved error and non-sensitive procedure names.
+' Returns:       None; error reporting must never mask the original error.
+' Description:   Isolated BAT adapter with a user-authorized local test mode.
+'-------------------------------------------------------------------------------
+Public Sub RecordError(ByVal className As String, ByVal methodName As String, _
+                       ByVal errorNumber As Long, ByVal errorDescription As String, _
+                       Optional ByVal context As String = vbNullString)
+    Dim reportingNumber As Long
+    Dim reportingDescription As String
+
+    ' Narrow reporting boundary: a logger failure must not replace the real error.
+    On Error Resume Next
+    errorTrace = Left$(errorTrace & className & "." & methodName & _
+        " [" & CStr(errorNumber) & "]: " & errorDescription & " " & context & vbCrLf, 24000)
+    VBA.Err.Clear
+#If BAT_CORE_ENABLED Then
+    If Len(context) > 0 Then
+        Call ErrorManager.addError( _
+            className, methodName, errorNumber, errorDescription, "location", context)
+    Else
+        Call ErrorManager.addError(className, methodName, errorNumber, errorDescription)
+    End If
+#End If
+    reportingNumber = VBA.Err.Number
+    reportingDescription = VBA.Err.Description
+    VBA.Err.Clear
+    If reportingNumber <> 0 Then
+        errorTrace = Left$(errorTrace & "Error reporting failed [" & _
+            CStr(reportingNumber) & "]: " & reportingDescription & vbCrLf, 24000)
+    End If
+    On Error GoTo 0
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    None.
+' Returns:       None.
+' Description:   Display once at the top-level boundary, after cleanup.
+'-------------------------------------------------------------------------------
+Public Sub DisplayErrors()
+    Dim reportingNumber As Long
+
+    On Error Resume Next
+    VBA.Err.Clear
+#If BAT_CORE_ENABLED Then
+    Call ErrorManager.display
+    reportingNumber = VBA.Err.Number
+    VBA.Err.Clear
+    If reportingNumber <> 0 Then
+        MsgBox Left$(errorTrace, 1800), vbCritical, "NeoAdvices - BAT display unavailable"
+    End If
+#Else
+    MsgBox Left$(errorTrace, 1800), vbCritical, "NeoAdvices - local test mode"
+#End If
+    On Error GoTo 0
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       String
+' Description:   Return the integration mode for the control panel.
+'-------------------------------------------------------------------------------
+Public Function BatModeCaption() As String
+    Const METHOD_NAME As String = "BatModeCaption"
+
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    #If BAT_CORE_ENABLED Then
+        BatModeCaption = "BAT core ON"
+    #Else
+        BatModeCaption = "TEST MODE - BAT core OFF"
+    #End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+

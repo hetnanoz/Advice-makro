@@ -1,0 +1,139 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoTests"
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Fail an explicit regression assertion without changing any workbook.
+'-------------------------------------------------------------------------------
+Private Sub RequireTest(ByVal passed As Boolean, ByVal testName As String)
+    Const METHOD_NAME As String = "RequireTest"
+
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If Not passed Then Err.Raise TOOL_ERROR + 90, METHOD_NAME, "Self-test failed: " & testName
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    One deliberately invalid numeric input.
+' Returns:       True only when validation rejects it.
+' Description:   Isolated test probe; its expected validation error is consumed.
+'-------------------------------------------------------------------------------
+Private Function RejectsNumericText(ByVal inputValue As Variant) As Boolean
+    Dim ignored As Variant
+    Dim errorNumber As Long
+
+    On Error Resume Next
+    VBA.Err.Clear
+    ignored = ParseEnglishNumber(inputValue)
+    errorNumber = VBA.Err.Number
+    VBA.Err.Clear
+    On Error GoTo 0
+    RejectsNumericText = (errorNumber <> 0)
+    Call ResetErrors
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Run 19 meaningful parser and allocation regressions in Excel without editing files.
+'-------------------------------------------------------------------------------
+Public Sub RunNeoSelfTests()
+    Const METHOD_NAME As String = "RunNeoSelfTests"
+    Dim value As Variant
+    Dim allocationData As Variant
+    Dim dictionary As Object
+    Dim mapped As Variant
+    Dim dateValue As Date
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call ResetErrors
+    If DEV_MODE Then
+        Err.Raise TOOL_ERROR + 91, METHOD_NAME, "Self-tests require DEV_MODE = False."
+    End If
+    If BatModeCaption() <> "TEST MODE - BAT core OFF" Then
+        Err.Raise TOOL_ERROR + 92, METHOD_NAME, "Run negative self-tests only with BAT core OFF."
+    End If
+    value = ParseEnglishNumber("52,000,000.00000")
+    Call RequireTest(VarType(value) = vbDouble And value = 52000000#, "Large integer becomes Double")
+    value = ParseEnglishNumber("491,678.00009")
+    Call RequireTest(Abs(value - 491678.00009) < 0.0000001, "Small decimal fraction is preserved")
+    value = ParseEnglishNumber("40,000,000.00019")
+    Call RequireTest(Abs(value - 40000000.00019) < 0.0000001, "Large amount retains fraction")
+    value = ParseEnglishNumber(123.45)
+    Call RequireTest(Abs(value - 123.45) < 0.000000001, "Already numeric input is unchanged")
+    value = ParseEnglishNumber("-1,234.50000")
+    Call RequireTest(value = -1234.5, "Negative English text")
+    value = ParseEnglishNumber("0.00000")
+    Call RequireTest(VarType(value) = vbDouble And value = 0, "Zero remains numeric")
+    value = ParseEnglishNumber(vbNullString)
+    Call RequireTest(IsEmpty(value), "Empty text remains empty")
+    Call RequireTest(RejectsNumericText("12,34"), "Reject ambiguous comma decimal")
+    Call RequireTest(RejectsNumericText("1.2.3"), "Reject multiple decimal marks")
+    Call RequireTest(RejectsNumericText("1,234.5,6"), "Reject comma in decimal fraction")
+    Call RequireTest(RejectsNumericText("not a number"), "Reject nonnumeric input")
+    Call RequireTest(RejectsNumericText("1234567890123456"), "Reject over-precision text")
+    Call RequireTest(CleanFileName("A/B:C?D") = "A_B_C_D", "Filename characters")
+    Call RequireTest(CleanText(" 1030035164W ") = "1030035164W", "Trim account key")
+    dateValue = ReadAllocationDate("14/10/2026", False)
+    Call RequireTest(dateValue = DateSerial(2026, 10, 14), "Unambiguous date parsing")
+    Call RequireTest(Weekday(dateValue, vbMonday) = 3, "Wednesday mapping")
+    ReDim allocationData(1 To 8, 1 To 27)
+    allocationData(5, 27) = "1030035164W"
+    allocationData(5, 11) = "First_A"
+    allocationData(6, 27) = " 1030035164w "
+    allocationData(6, 11) = "Second_B"
+    allocationData(7, 27) = vbNullString
+    allocationData(8, 27) = "1030035168A"
+    allocationData(8, 8) = "KAG_TEST"
+    Set dictionary = BuildAllocationDictionary(allocationData, 11)
+    Call RequireTest(dictionary.Count = 2, "Ignore blank keys and keep first duplicate")
+    mapped = dictionary("1030035164W")
+    Call RequireTest(mapped(0) = "First_A", "First duplicate wins")
+    mapped = dictionary("1030035168A")
+    Call RequireTest(mapped(0) = UNASSIGNED_NAME And mapped(1) = "KAG_TEST", _
+        "Blank accountant keeps other allocation metadata")
+    MsgBox "19 self-tests passed. Excel interface and export still require the acceptance tests.", _
+        vbInformation, "NeoAdvices self-tests"
+
+ExitPoint:
+    Set dictionary = Nothing
+    If errNumber <> 0 Then
+        Call DisplayErrors
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+

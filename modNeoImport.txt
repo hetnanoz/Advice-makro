@@ -1,0 +1,531 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoImport"
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       String
+' Description:   Prompt for one XLSX export; cancellation returns an empty string.
+'-------------------------------------------------------------------------------
+Public Function PickInputFile(ByVal dialogTitle As String) As String
+    Const METHOD_NAME As String = "PickInputFile"
+    Dim dialog As FileDialog
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set dialog = Application.FileDialog(msoFileDialogFilePicker)
+    With dialog
+        .Title = dialogTitle
+        .AllowMultiSelect = False
+        .Filters.Clear
+        .Filters.Add "Excel export (*.xlsx)", "*.xlsx"
+        If .Show = -1 Then PickInputFile = .SelectedItems(1)
+    End With
+
+ExitPoint:
+    Set dialog = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       String
+' Description:   Prompt for an output folder without changing the active workbook.
+'-------------------------------------------------------------------------------
+Public Function PickOutputFolder() As String
+    Const METHOD_NAME As String = "PickOutputFolder"
+    Dim dialog As FileDialog
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set dialog = Application.FileDialog(msoFileDialogFolderPicker)
+    With dialog
+        .Title = "Wybierz folder do zapisu indywidualnych plikow dla Accountantow"
+        .AllowMultiSelect = False
+        If .Show = -1 Then PickOutputFolder = .SelectedItems(1)
+    End With
+
+ExitPoint:
+    Set dialog = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Worksheet
+' Description:   Find one unambiguous input sheet using its documented key header position.
+'-------------------------------------------------------------------------------
+Public Function ResolveInputSheet(ByVal wb As Workbook, ByVal isNeo As Boolean) As Worksheet
+    Const METHOD_NAME As String = "ResolveInputSheet"
+    Dim ws As Worksheet
+    Dim headerRow As Long
+    Dim keyColumn As Long
+    Dim expectedHeader As String
+    Dim candidateCount As Long
+    Dim headerValue As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If isNeo Then
+        headerRow = 1
+        keyColumn = 3
+        expectedHeader = HDR_KEY
+    Else
+        headerRow = REP_HEADER_ROW
+        keyColumn = 27
+        expectedHeader = "isis_account"
+    End If
+    For Each ws In wb.Worksheets
+        headerValue = ws.Cells(headerRow, keyColumn).Value2
+        If Not IsError(headerValue) Then
+            If StrComp(CStr(headerValue), expectedHeader, vbBinaryCompare) = 0 Then
+                Set ResolveInputSheet = ws
+                candidateCount = candidateCount + 1
+            End If
+        End If
+    Next ws
+    If candidateCount <> 1 Then
+        Err.Raise TOOL_ERROR + 20, METHOD_NAME, _
+            "Expected exactly one input sheet matching header: " & expectedHeader
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Validate required headers and table-safe unique column names before reset.
+'-------------------------------------------------------------------------------
+Public Sub ValidateNeoHeaders(ByVal ws As Worksheet, ByVal lastColumn As Long)
+    Const METHOD_NAME As String = "ValidateNeoHeaders"
+    Dim required As Variant
+    Dim header As Variant
+    Dim index As Long
+    Dim columnIndex As Long
+    Dim headerText As String
+    Dim names As Object
+    Dim added As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    required = Array("Fund", HDR_GROUP, HDR_KEY, HDR_STATUS, HDR_QUANTITY, _
+        HDR_SEC_CODE, HDR_SEC_QUANTITY, HDR_CASH_CODE, HDR_CASH_AMOUNT)
+    For Each header In required
+        index = GetColumnIndexByHeader(ws, 1, CStr(header))
+    Next header
+    Set names = CreateObject("Scripting.Dictionary")
+    names.CompareMode = vbTextCompare
+    added = Array("Done", "Doubt", "Accountant", "KAG", "Fondsnr. KVG", _
+        "NAV Group", "Master", "Fondsname", "NAV calculation")
+    For Each header In added
+        names.Add CStr(header), True
+    Next header
+    For columnIndex = 1 To lastColumn
+        headerText = CleanText(ws.Cells(1, columnIndex).Value2)
+        If Len(headerText) = 0 Or Len(headerText) > 255 Then
+            Err.Raise TOOL_ERROR + 21, METHOD_NAME, "Empty or overlong NeoAdvices header."
+        End If
+        If names.Exists(headerText) Then
+            Err.Raise TOOL_ERROR + 22, METHOD_NAME, "Duplicate or reserved NeoAdvices header: " & headerText
+        End If
+        names.Add headerText, True
+    Next columnIndex
+
+ExitPoint:
+    Set names = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Verify all fixed Repartition positions against their headers.
+'-------------------------------------------------------------------------------
+Public Sub ValidateRepartition(ByVal ws As Worksheet)
+    Const METHOD_NAME As String = "ValidateRepartition"
+    Dim columns As Variant
+    Dim headers As Variant
+    Dim itemIndex As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    columns = Array(1, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 27)
+    headers = Array("Fondsnr. KVG", "NAV Group", "Master", "Fondsname", "KAG", _
+        "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "NAV calculation", "isis_account")
+    For itemIndex = LBound(columns) To UBound(columns)
+        If StrComp(CleanText(ws.Cells(REP_HEADER_ROW, columns(itemIndex)).Value2), _
+                   CStr(headers(itemIndex)), vbBinaryCompare) <> 0 Then
+            Err.Raise TOOL_ERROR + 23, METHOD_NAME, _
+                "Unexpected Repartition header in column " & CStr(columns(itemIndex)) & _
+                ". Expected: " & CStr(headers(itemIndex))
+        End If
+    Next itemIndex
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Boolean
+' Description:   Choose today by its actual row-3 date, or explicitly choose a weekday.
+'-------------------------------------------------------------------------------
+Public Function ChooseAllocationColumn(ByVal ws As Worksheet, ByRef columnIndex As Long, _
+                                       ByRef allocationDate As Date) As Boolean
+    Const METHOD_NAME As String = "ChooseAllocationColumn"
+    Dim answer As VbMsgBoxResult
+    Dim entered As Variant
+    Dim weekdayIndex As Long
+    Dim dates(1 To 5) As Date
+    Dim itemIndex As Long
+    Dim matchCount As Long
+    Dim promptText As String
+    Dim isCancelled As Boolean
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For itemIndex = 1 To 5
+        dates(itemIndex) = ReadAllocationDate(ws.Cells(REP_DATE_ROW, itemIndex + 8).Value2, _
+                                             ws.Parent.Date1904)
+        If Weekday(dates(itemIndex), vbMonday) <> itemIndex Then
+            Err.Raise TOOL_ERROR + 24, METHOD_NAME, "Date above a weekday does not match that weekday."
+        End If
+        If itemIndex > 1 Then
+            If dates(itemIndex) <> dates(1) + itemIndex - 1 Then
+                Err.Raise TOOL_ERROR + 25, METHOD_NAME, "Repartition dates must describe one working week."
+            End If
+        End If
+    Next itemIndex
+    answer = MsgBox("Uzyc dzisiejszej daty: " & Format$(Date, "dd/mm/yyyy") & "?" & vbCrLf & _
+        "Tak = znajdz dokladnie te date w I3:M3." & vbCrLf & _
+        "Nie = wybierz dzien 1-5 z datami tego pliku.", vbYesNoCancel + vbQuestion, "Dzien alokacji")
+    If answer = vbYes Then
+        For itemIndex = 1 To 5
+            If dates(itemIndex) = Date Then
+                columnIndex = itemIndex + 8
+                allocationDate = dates(itemIndex)
+                matchCount = matchCount + 1
+            End If
+        Next itemIndex
+        If matchCount <> 1 Then
+            Err.Raise TOOL_ERROR + 26, METHOD_NAME, _
+                "Today's date is absent from I3:M3. Use the correct week or choose a day manually."
+        End If
+        ChooseAllocationColumn = True
+    ElseIf answer = vbNo Then
+        promptText = "Wybierz dzien (1-5):" & vbCrLf
+        For itemIndex = 1 To 5
+            promptText = promptText & CStr(itemIndex) & " = " & _
+                CStr(ws.Cells(REP_HEADER_ROW, itemIndex + 8).Value2) & " " & _
+                Format$(dates(itemIndex), "dd/mm/yyyy") & vbCrLf
+        Next itemIndex
+        Do
+            entered = Application.InputBox(promptText, "Dzien alokacji", Type:=1)
+            isCancelled = False
+            If VarType(entered) = vbBoolean Then isCancelled = (entered = False)
+            If isCancelled Then
+                Exit Do
+            ElseIf CDbl(entered) >= 1 And CDbl(entered) <= 5 And CDbl(entered) = Fix(CDbl(entered)) Then
+                weekdayIndex = CLng(entered)
+                columnIndex = weekdayIndex + 8
+                allocationDate = dates(weekdayIndex)
+                ChooseAllocationColumn = True
+                Exit Do
+            Else
+                MsgBox "Wpisz calkowita liczbe od 1 do 5.", vbInformation, "Dzien alokacji"
+            End If
+        Loop
+    End If
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Object
+' Description:   Build a case-insensitive allocation lookup; silently retain the first duplicate.
+'-------------------------------------------------------------------------------
+Public Function BuildAllocationDictionary(ByRef sourceData As Variant, _
+                                          ByVal weekdayColumn As Long) As Object
+    Const METHOD_NAME As String = "BuildAllocationDictionary"
+    Dim dictionary As Object
+    Dim rowIndex As Long
+    Dim key As String
+    Dim accountant As String
+    Dim allocation As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set dictionary = CreateObject("Scripting.Dictionary")
+    dictionary.CompareMode = vbTextCompare
+    For rowIndex = REP_HEADER_ROW + 1 To UBound(sourceData, 1)
+        key = CleanText(sourceData(rowIndex, 27))
+        If Len(key) > 0 Then
+            If Not dictionary.Exists(key) Then
+                accountant = CleanText(sourceData(rowIndex, weekdayColumn))
+                If Len(accountant) = 0 Then accountant = UNASSIGNED_NAME
+                allocation = Array(accountant, CleanText(sourceData(rowIndex, 8)), _
+                    sourceData(rowIndex, 1), CleanText(sourceData(rowIndex, 4)), _
+                    sourceData(rowIndex, 5), sourceData(rowIndex, 7), CleanText(sourceData(rowIndex, 14)))
+                dictionary.Add key, allocation
+            End If
+        End If
+    Next rowIndex
+    Set BuildAllocationDictionary = dictionary
+
+ExitPoint:
+    Set dictionary = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Variant
+' Description:   Enrich in memory and validate numeric values before clearing the Master.
+'-------------------------------------------------------------------------------
+Public Function BuildEnrichedData(ByVal ws As Worksheet, ByRef sourceData As Variant, _
+                                  ByVal allocations As Object) As Variant
+    Const METHOD_NAME As String = "BuildEnrichedData"
+    Dim result() As Variant
+    Dim headers As Variant
+    Dim allocation As Variant
+    Dim numericColumns As Variant
+    Dim numericColumn As Variant
+    Dim rowIndex As Long
+    Dim columnIndex As Long
+    Dim keyColumn As Long
+    Dim groupColumn As Long
+    Dim rowCount As Long
+    Dim columnCount As Long
+    Dim key As String
+    Dim groupText As String
+    Dim hasData As Boolean
+    Dim codeColumns As Variant
+    Dim codeColumn As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    rowCount = UBound(sourceData, 1)
+    columnCount = UBound(sourceData, 2)
+    keyColumn = GetColumnIndexByHeader(ws, 1, HDR_KEY)
+    groupColumn = GetColumnIndexByHeader(ws, 1, HDR_GROUP)
+    numericColumns = Array(GetColumnIndexByHeader(ws, 1, HDR_QUANTITY), _
+        GetColumnIndexByHeader(ws, 1, HDR_SEC_QUANTITY), GetColumnIndexByHeader(ws, 1, HDR_CASH_AMOUNT))
+    headers = Array("Accountant", "KAG", "Fondsnr. KVG", "NAV Group", _
+        "Master", "Fondsname", "NAV calculation")
+    codeColumns = Array(GetColumnIndexByHeader(ws, 1, HDR_SEC_CODE), _
+        GetColumnIndexByHeader(ws, 1, HDR_CASH_CODE), GetColumnIndexByHeader(ws, 1, HDR_STATUS))
+    ReDim result(1 To rowCount, 1 To columnCount + ADDED_COLUMNS)
+    For columnIndex = 1 To ADDED_COLUMNS
+        result(1, columnIndex) = headers(columnIndex - 1)
+    Next columnIndex
+    For columnIndex = 1 To columnCount
+        result(1, columnIndex + ADDED_COLUMNS) = sourceData(1, columnIndex)
+    Next columnIndex
+    For rowIndex = 2 To rowCount
+        hasData = False
+        For columnIndex = 1 To columnCount
+            If IsError(sourceData(rowIndex, columnIndex)) Then
+                Err.Raise TOOL_ERROR + 27, METHOD_NAME, _
+                    "NeoAdvices contains an Excel error at row " & CStr(rowIndex) & _
+                    ", column " & CStr(columnIndex) & "."
+            End If
+            If Len(CStr(sourceData(rowIndex, columnIndex))) > 0 Then hasData = True
+            result(rowIndex, columnIndex + ADDED_COLUMNS) = sourceData(rowIndex, columnIndex)
+        Next columnIndex
+        If Not hasData Then
+            Err.Raise TOOL_ERROR + 28, METHOD_NAME, _
+                "Empty record inside NeoAdvices at row " & CStr(rowIndex) & "."
+        End If
+        For Each numericColumn In numericColumns
+            result(rowIndex, CLng(numericColumn) + ADDED_COLUMNS) = _
+                ParseEnglishNumber(sourceData(rowIndex, CLng(numericColumn)))
+        Next numericColumn
+        For Each codeColumn In codeColumns
+            result(rowIndex, CLng(codeColumn) + ADDED_COLUMNS) = _
+                UCase$(CleanText(sourceData(rowIndex, CLng(codeColumn))))
+        Next codeColumn
+        groupText = CleanText(sourceData(rowIndex, groupColumn))
+        Select Case UCase$(groupText)
+            Case "CASH": groupText = "Cash"
+            Case "SECCASH": groupText = "SecCash"
+            Case "SECURITY": groupText = "Security"
+            Case Else
+                Err.Raise TOOL_ERROR + 29, METHOD_NAME, _
+                    "Unknown Type Group at row " & CStr(rowIndex) & "."
+        End Select
+        result(rowIndex, groupColumn + ADDED_COLUMNS) = groupText
+        key = CleanText(sourceData(rowIndex, keyColumn))
+        result(rowIndex, keyColumn + ADDED_COLUMNS) = key
+        If allocations.Exists(key) Then
+            allocation = allocations(key)
+            For columnIndex = 1 To ADDED_COLUMNS
+                If IsError(allocation(columnIndex - 1)) Then
+                    Err.Raise TOOL_ERROR + 30, METHOD_NAME, "An allocation field contains an Excel error."
+                End If
+                result(rowIndex, columnIndex) = allocation(columnIndex - 1)
+            Next columnIndex
+        Else
+            result(rowIndex, 1) = UNASSIGNED_NAME
+        End If
+    Next rowIndex
+    BuildEnrichedData = result
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription, _
+        "NeoAdvices row=" & CStr(rowIndex))
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Copy a full data snapshot at its original coordinates without external formula links.
+'-------------------------------------------------------------------------------
+Public Sub CopyInputSnapshot(ByVal source As Worksheet, ByVal target As Worksheet, _
+                             ByVal lastRow As Long, ByVal lastColumn As Long)
+    Const METHOD_NAME As String = "CopyInputSnapshot"
+    Dim sourceRange As Range
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set sourceRange = source.Range(source.Cells(1, 1), source.Cells(lastRow, lastColumn))
+    sourceRange.Copy
+     target.Cells(1, 1).PasteSpecial Paste:=xlPasteValuesAndNumberFormats
+     target.Cells(1, 1).PasteSpecial Paste:=xlPasteFormats
+     target.Cells(1, 1).PasteSpecial Paste:=xlPasteColumnWidths
+    Application.CutCopyMode = False
+
+ExitPoint:
+    Set sourceRange = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+

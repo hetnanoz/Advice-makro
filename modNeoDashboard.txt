@@ -1,0 +1,563 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoDashboard"
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Remove stale caches before replacing this dedicated three-sheet tool view.
+'-------------------------------------------------------------------------------
+Public Sub RemoveAllSlicerCaches(ByVal wb As Workbook)
+    Const METHOD_NAME As String = "RemoveAllSlicerCaches"
+    Dim cacheIndex As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For cacheIndex = wb.SlicerCaches.Count To 1 Step -1
+        wb.SlicerCaches(cacheIndex).Delete
+    Next cacheIndex
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Build the complete interactive table, leaving rows 1-10 for controls.
+'-------------------------------------------------------------------------------
+Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
+                          ByVal allocationDate As Date, ByVal runStamp As String)
+    Const METHOD_NAME As String = "BuildDashboard"
+    Dim ws As Worksheet
+    Dim result() As Variant
+    Dim rowCount As Long
+    Dim columnCount As Long
+    Dim rowIndex As Long
+    Dim columnIndex As Long
+    Dim lo As ListObject
+    Dim tableRange As Range
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
+    rowCount = UBound(enriched, 1)
+    columnCount = UBound(enriched, 2) + 2
+    ReDim result(1 To rowCount, 1 To columnCount)
+    result(1, 1) = "Done"
+    result(1, 2) = "Doubt"
+    For rowIndex = 1 To rowCount
+        For columnIndex = 1 To UBound(enriched, 2)
+            result(rowIndex, columnIndex + 2) = enriched(rowIndex, columnIndex)
+        Next columnIndex
+    Next rowIndex
+    Set tableRange = ws.Cells(DASH_HEADER_ROW, 1).Resize(rowCount, UBound(result, 2))
+    tableRange.NumberFormat = "@"
+    tableRange.Value2 = result
+    Set lo = ws.ListObjects.Add(SourceType:=xlSrcRange, Source:=tableRange, XlListObjectHasHeaders:=xlYes)
+    lo.Name = TABLE_DASHBOARD
+    ' Empty style is Excel's native no-style setting; TableStyleNone is not portable.
+    lo.TableStyle = vbNullString
+    lo.ShowTableStyleRowStripes = False
+    lo.ShowTableStyleColumnStripes = False
+    lo.ShowTotals = False
+    wb.Worksheets(SHEET_NEO).Cells(1, 1).Resize(rowCount, UBound(enriched, 2)).Copy
+    ws.Cells(DASH_HEADER_ROW, 3).PasteSpecial Paste:=xlPasteFormats
+    Application.CutCopyMode = False
+    Call FormatHeader(lo.HeaderRowRange)
+    Call ApplyDataFormatting(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
+    Call FitDataColumns(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
+    ws.Rows("1:8").RowHeight = 21
+    ws.Rows("9:10").RowHeight = 24
+    Call CreateDashboardControls(wb, False)
+    Call WriteDashboardCaption(ws, allocationDate, runStamp, "MASTER")
+
+ExitPoint:
+    Set tableRange = Nothing
+    Set lo = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Show the selected allocation date and BAT mode in the control panel.
+'-------------------------------------------------------------------------------
+Public Sub WriteDashboardCaption(ByVal ws As Worksheet, ByVal allocationDate As Date, _
+                                 ByVal runStamp As String, ByVal viewName As String)
+    Const METHOD_NAME As String = "WriteDashboardCaption"
+
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    With ws.Cells(10, 1)
+        .Value2 = "NeoAdvices " & TOOL_VERSION & " | " & viewName & " | Allocation: " & _
+            Format$(allocationDate, "dd/mm/yyyy") & " | Run: " & runStamp & " | " & BatModeCaption()
+        .Font.Name = "Calibri"
+        .Font.Size = 10
+        .Font.Bold = True
+        .Font.Color = RGB(31, 55, 79)
+        .WrapText = False
+    End With
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Create four Master slicers or three individual slicers and five macro buttons.
+'-------------------------------------------------------------------------------
+Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boolean)
+    Const METHOD_NAME As String = "CreateDashboardControls"
+    Dim ws As Worksheet
+    Dim lo As ListObject
+    Dim fields As Variant
+    Dim captions As Variant
+    Dim macroNames As Variant
+    Dim fieldIndex As Long
+    Dim buttonIndex As Long
+    Dim itemIndex As Long
+    Dim cache As SlicerCache
+    Dim slicer As Slicer
+    Dim button As Shape
+    Dim leftPosition As Double
+    Dim topPosition As Double
+    Dim buttonWidth As Double
+    Dim ownerMacro As String
+    Dim lastButton As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
+    Set lo = ws.ListObjects(TABLE_DASHBOARD)
+    For itemIndex = ws.Shapes.Count To 1 Step -1
+        If Left$(ws.Shapes(itemIndex).Name, 7) = "btnNeo_" Then ws.Shapes(itemIndex).Delete
+    Next itemIndex
+    If individual Then
+        fields = Array("KAG", "NAV Group", "NAV calculation")
+    Else
+        fields = Array("Accountant", "KAG", "NAV Group", "NAV calculation")
+    End If
+    For fieldIndex = LBound(fields) To UBound(fields)
+        Set cache = wb.SlicerCaches.Add2(lo, CStr(fields(fieldIndex)), "scNeo_" & CStr(fieldIndex + 1))
+        Set slicer = cache.Slicers.Add(SlicerDestination:=ws, Name:="slNeo_" & CStr(fieldIndex + 1), _
+            Caption:=CStr(fields(fieldIndex)), Top:=4, Left:=6 + fieldIndex * 190, Width:=184, Height:=160)
+        slicer.NumberOfColumns = 1
+        slicer.Shape.Placement = xlFreeFloating
+    Next fieldIndex
+    captions = Array("ALL", "Cash", "SecCash", "Security", "SecCash + Security", "Import / Refresh")
+    macroNames = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", _
+        "FilterSecCashSecurity", "RunNeoAdvices")
+    lastButton = 4
+    If Not individual Then lastButton = 5
+    leftPosition = 6
+    topPosition = ws.Rows(9).Top + 1
+    For buttonIndex = 0 To lastButton
+        buttonWidth = 104
+        If buttonIndex = 4 Then buttonWidth = 170
+        If buttonIndex = 5 Then buttonWidth = 132
+        Set button = ws.Shapes.AddShape(msoShapeRoundedRectangle, leftPosition, topPosition, buttonWidth, 21)
+        button.Name = "btnNeo_" & CStr(buttonIndex + 1)
+        button.TextFrame2.TextRange.Text = CStr(captions(buttonIndex))
+        button.TextFrame2.TextRange.Font.Size = 10
+        button.TextFrame2.TextRange.Font.Bold = msoTrue
+        button.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(255, 255, 255)
+        button.TextFrame2.TextRange.ParagraphFormat.Alignment = msoAlignCenter
+        button.TextFrame2.VerticalAnchor = msoAnchorMiddle
+        button.Fill.ForeColor.RGB = RGB(31, 78, 121)
+        button.Line.Visible = msoFalse
+        button.Placement = xlFreeFloating
+        ownerMacro = "'" & Replace(wb.Name, "'", "''") & "'!" & CStr(macroNames(buttonIndex))
+        button.OnAction = ownerMacro
+        leftPosition = leftPosition + buttonWidth + 6
+    Next buttonIndex
+
+ExitPoint:
+    Set button = Nothing
+    Set slicer = Nothing
+    Set cache = Nothing
+    Set lo = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Bind buttons to the saved copy name, never to the Master or temporary filename.
+'-------------------------------------------------------------------------------
+Public Sub RebindDashboardButtons(ByVal wb As Workbook, ByVal savedFileName As String)
+    Const METHOD_NAME As String = "RebindDashboardButtons"
+    Dim ws As Worksheet
+    Dim names As Variant
+    Dim itemIndex As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
+    If HasCopyMarker(wb) Then
+        names = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", "FilterSecCashSecurity")
+    Else
+        names = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", _
+            "FilterSecCashSecurity", "RunNeoAdvices")
+    End If
+    For itemIndex = LBound(names) To UBound(names)
+        ws.Shapes("btnNeo_" & CStr(itemIndex + 1)).OnAction = _
+            "'" & Replace(savedFileName, "'", "''") & "'!" & CStr(names(itemIndex))
+    Next itemIndex
+
+ExitPoint:
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Change only the Type Group filter; preserve selections in other slicers.
+'-------------------------------------------------------------------------------
+Public Sub ApplyTypeFilter(ByVal wb As Workbook, ByVal mode As Long)
+    Const METHOD_NAME As String = "ApplyTypeFilter"
+    Dim ws As Worksheet
+    Dim lo As ListObject
+    Dim fieldIndex As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
+    Set lo = ws.ListObjects(TABLE_DASHBOARD)
+    fieldIndex = lo.ListColumns(HDR_GROUP).Index
+    Select Case mode
+        Case 0
+            If lo.AutoFilter.Filters(fieldIndex).On Then lo.Range.AutoFilter Field:=fieldIndex
+        Case 1
+            lo.Range.AutoFilter Field:=fieldIndex, Criteria1:="Cash"
+        Case 2
+            lo.Range.AutoFilter Field:=fieldIndex, Criteria1:="SecCash"
+        Case 3
+            lo.Range.AutoFilter Field:=fieldIndex, Criteria1:="Security"
+        Case 4
+            lo.Range.AutoFilter Field:=fieldIndex, Criteria1:=Array("SecCash", "Security"), _
+                Operator:=xlFilterValues
+        Case Else
+            Err.Raise TOOL_ERROR + 40, METHOD_NAME, "Unknown Type Group filter mode."
+    End Select
+
+ExitPoint:
+    Set lo = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   User-facing filter macro assigned to a shape.
+'-------------------------------------------------------------------------------
+Public Sub FilterAll()
+    Const METHOD_NAME As String = "FilterAll"
+    Dim wb As Workbook
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wb = Application.ActiveWorkbook
+    Call ResetErrors
+    If wb Is Nothing Then Err.Raise TOOL_ERROR + 41, METHOD_NAME, "No active workbook."
+    Call ApplyTypeFilter(wb, 0)
+
+ExitPoint:
+    Set wb = Nothing
+    If errNumber <> 0 Then
+        Call DisplayErrors
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   User-facing filter macro assigned to a shape.
+'-------------------------------------------------------------------------------
+Public Sub FilterCash()
+    Const METHOD_NAME As String = "FilterCash"
+    Dim wb As Workbook
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wb = Application.ActiveWorkbook
+    Call ResetErrors
+    If wb Is Nothing Then Err.Raise TOOL_ERROR + 41, METHOD_NAME, "No active workbook."
+    Call ApplyTypeFilter(wb, 1)
+
+ExitPoint:
+    Set wb = Nothing
+    If errNumber <> 0 Then
+        Call DisplayErrors
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   User-facing filter macro assigned to a shape.
+'-------------------------------------------------------------------------------
+Public Sub FilterSecCash()
+    Const METHOD_NAME As String = "FilterSecCash"
+    Dim wb As Workbook
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wb = Application.ActiveWorkbook
+    Call ResetErrors
+    If wb Is Nothing Then Err.Raise TOOL_ERROR + 41, METHOD_NAME, "No active workbook."
+    Call ApplyTypeFilter(wb, 2)
+
+ExitPoint:
+    Set wb = Nothing
+    If errNumber <> 0 Then
+        Call DisplayErrors
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   User-facing filter macro assigned to a shape.
+'-------------------------------------------------------------------------------
+Public Sub FilterSecurity()
+    Const METHOD_NAME As String = "FilterSecurity"
+    Dim wb As Workbook
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wb = Application.ActiveWorkbook
+    Call ResetErrors
+    If wb Is Nothing Then Err.Raise TOOL_ERROR + 41, METHOD_NAME, "No active workbook."
+    Call ApplyTypeFilter(wb, 3)
+
+ExitPoint:
+    Set wb = Nothing
+    If errNumber <> 0 Then
+        Call DisplayErrors
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   User-facing filter macro assigned to a shape.
+'-------------------------------------------------------------------------------
+Public Sub FilterSecCashSecurity()
+    Const METHOD_NAME As String = "FilterSecCashSecurity"
+    Dim wb As Workbook
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wb = Application.ActiveWorkbook
+    Call ResetErrors
+    If wb Is Nothing Then Err.Raise TOOL_ERROR + 41, METHOD_NAME, "No active workbook."
+    Call ApplyTypeFilter(wb, 4)
+
+ExitPoint:
+    Set wb = Nothing
+    If errNumber <> 0 Then
+        Call DisplayErrors
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Boolean
+' Description:   Detect Done or Doubt before a destructive refresh of the current view.
+'-------------------------------------------------------------------------------
+Public Function HasExistingProgress(ByVal wb As Workbook) As Boolean
+    Const METHOD_NAME As String = "HasExistingProgress"
+    Dim ws As Worksheet
+    Dim lo As ListObject
+    Dim values As Variant
+    Dim rowIndex As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
+    For Each lo In ws.ListObjects
+        If lo.Name = TABLE_DASHBOARD Then
+            If Not lo.DataBodyRange Is Nothing Then
+                values = lo.DataBodyRange.Columns(1).Resize(, 2).Value2
+                For rowIndex = 1 To UBound(values, 1)
+                    If Len(CleanText(values(rowIndex, 1))) > 0 Or Len(CleanText(values(rowIndex, 2))) > 0 Then
+                        HasExistingProgress = True
+                        Exit For
+                    End If
+                Next rowIndex
+            End If
+            Exit For
+        End If
+    Next lo
+
+ExitPoint:
+    Set lo = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+

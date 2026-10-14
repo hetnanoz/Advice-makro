@@ -1,0 +1,414 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoExport"
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       String
+' Description:   Create a unique staging folder; incomplete batches retain their explicit status.
+'-------------------------------------------------------------------------------
+Public Function CreateRunFolder(ByVal parentFolder As String, ByVal runStamp As String) As String
+    Const METHOD_NAME As String = "CreateRunFolder"
+    Dim fso As Object
+    Dim candidate As String
+    Dim suffix As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If Not fso.FolderExists(parentFolder) Then
+        Err.Raise TOOL_ERROR + 50, METHOD_NAME, "The output folder does not exist."
+    End If
+    candidate = fso.BuildPath(parentFolder, "NeoAdvices_IN_PROGRESS_" & runStamp)
+    Do While fso.FolderExists(candidate)
+        suffix = suffix + 1
+        candidate = fso.BuildPath(parentFolder, _
+            "NeoAdvices_IN_PROGRESS_" & runStamp & "_" & Format$(suffix, "000"))
+    Loop
+    If Len(candidate) > 125 Then
+        Err.Raise TOOL_ERROR + 51, METHOD_NAME, "Choose a shorter output folder path."
+    End If
+    fso.CreateFolder candidate
+    CreateRunFolder = candidate
+
+ExitPoint:
+    Set fso = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       String
+' Description:   Publish the closed, complete output batch by renaming its staging folder.
+'-------------------------------------------------------------------------------
+Public Function FinalizeRunFolder(ByVal stagingFolder As String) As String
+    Const METHOD_NAME As String = "FinalizeRunFolder"
+    Dim fso As Object
+    Dim finalPath As String
+    Dim basePath As String
+    Dim suffix As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    basePath = fso.BuildPath(fso.GetParentFolderName(stagingFolder), _
+        Replace(fso.GetFileName(stagingFolder), "IN_PROGRESS_", vbNullString, 1, 1, vbBinaryCompare))
+    finalPath = basePath
+    Do While fso.FolderExists(finalPath)
+        suffix = suffix + 1
+        finalPath = basePath & "_" & Format$(suffix, "000")
+    Loop
+    Name stagingFolder As finalPath
+    FinalizeRunFolder = finalPath
+
+ExitPoint:
+    Set fso = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       String
+' Description:   Never overwrite an existing output, including sanitized-name collisions.
+'-------------------------------------------------------------------------------
+Public Function UniqueOutputPath(ByVal folderPath As String, ByVal stem As String) As String
+    Const METHOD_NAME As String = "UniqueOutputPath"
+    Dim fso As Object
+    Dim candidate As String
+    Dim suffix As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    candidate = fso.BuildPath(folderPath, stem & ".xlsm")
+    Do While fso.FileExists(candidate)
+        suffix = suffix + 1
+        candidate = fso.BuildPath(folderPath, stem & "_" & Format$(suffix, "000") & ".xlsm")
+    Loop
+    If Len(candidate) > 218 Then
+        Err.Raise TOOL_ERROR + 52, METHOD_NAME, "The generated Excel path is too long."
+    End If
+    UniqueOutputPath = candidate
+
+ExitPoint:
+    Set fso = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       Object
+' Description:   Collect unique accountants and expected row counts from the enriched source.
+'-------------------------------------------------------------------------------
+Public Function AccountantCounts(ByVal wsNeo As Worksheet) As Object
+    Const METHOD_NAME As String = "AccountantCounts"
+    Dim result As Object
+    Dim lastRow As Long
+    Dim lastColumn As Long
+    Dim values As Variant
+    Dim rowIndex As Long
+    Dim key As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set result = CreateObject("Scripting.Dictionary")
+    result.CompareMode = vbTextCompare
+    Call GetDataBounds(wsNeo, lastRow, lastColumn)
+    values = wsNeo.Range(wsNeo.Cells(1, 1), wsNeo.Cells(lastRow, 1)).Value2
+    For rowIndex = 2 To lastRow
+        key = CleanText(values(rowIndex, 1))
+        If Len(key) = 0 Then key = UNASSIGNED_NAME
+        If result.Exists(key) Then
+            result(key) = CLng(result(key)) + 1
+        Else
+            result.Add key, 1&
+        End If
+    Next rowIndex
+    Set AccountantCounts = result
+
+ExitPoint:
+    Set result = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Delete non-owned table rows from bottom to top and validate retained ownership.
+'-------------------------------------------------------------------------------
+Public Sub TrimIndividualDashboard(ByVal wb As Workbook, ByVal accountantName As String, _
+                                   ByVal expectedCount As Long)
+    Const METHOD_NAME As String = "TrimIndividualDashboard"
+    Dim ws As Worksheet
+    Dim lo As ListObject
+    Dim values As Variant
+    Dim rowIndex As Long
+    Dim fieldIndex As Long
+    Dim actualCount As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
+    Set lo = ws.ListObjects(TABLE_DASHBOARD)
+    Call RemoveAllSlicerCaches(wb)
+    If lo.AutoFilter.FilterMode Then lo.AutoFilter.ShowAllData
+    If lo.DataBodyRange Is Nothing Then
+        Err.Raise TOOL_ERROR + 53, METHOD_NAME, "The copied Dashboard has no data rows."
+    End If
+    fieldIndex = lo.ListColumns(HDR_ACCOUNTANT).Index
+    ' Rebuild the same rules once after deletion to avoid fragmented conditional formats.
+    lo.DataBodyRange.FormatConditions.Delete
+    values = lo.DataBodyRange.Value2
+    For rowIndex = UBound(values, 1) To 1 Step -1
+        If StrComp(CleanText(values(rowIndex, fieldIndex)), accountantName, vbTextCompare) <> 0 Then
+            lo.ListRows(rowIndex).Delete
+        End If
+    Next rowIndex
+    actualCount = lo.ListRows.Count
+    If actualCount <> expectedCount Or actualCount = 0 Then
+        Err.Raise TOOL_ERROR + 54, METHOD_NAME, "Individual Dashboard row-count validation failed."
+    End If
+    values = lo.DataBodyRange.Value2
+    For rowIndex = 1 To UBound(values, 1)
+        If StrComp(CleanText(values(rowIndex, fieldIndex)), accountantName, vbTextCompare) <> 0 Then
+            Err.Raise TOOL_ERROR + 55, METHOD_NAME, "Individual Dashboard ownership validation failed."
+        End If
+    Next rowIndex
+    Call ApplyDataFormatting(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + actualCount, lo.ListColumns.Count, True)
+    Call CreateDashboardControls(wb, True)
+    wb.Names.Add Name:=COPY_MARKER, RefersTo:="=TRUE", Visible:=False
+    ' With exactly three sheets, hiding both sources leaves Dashboard as the only visible sheet.
+    ws.Visible = xlSheetVisible
+    wb.Worksheets(SHEET_NEO).Visible = xlSheetHidden
+    wb.Worksheets(SHEET_REPARTITION).Visible = xlSheetHidden
+
+ExitPoint:
+    Set lo = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Create an independent XLSM copy without touching the VBA project object model.
+'-------------------------------------------------------------------------------
+Private Sub SaveIndividualCopy(ByVal wbMaster As Workbook, ByVal filePath As String, _
+                               ByVal accountantName As String, ByVal expectedCount As Long, _
+                               ByVal allocationDate As Date, ByVal runStamp As String)
+    Const METHOD_NAME As String = "SaveIndividualCopy"
+    Dim wbIndividual As Workbook
+    Dim fso As Object
+    Dim copyCreated As Boolean
+    Dim copyComplete As Boolean
+    Dim cleanupFailed As Boolean
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If fso.FileExists(filePath) Then
+        Err.Raise TOOL_ERROR + 56, METHOD_NAME, "Output already exists; refusing to overwrite."
+    End If
+    wbMaster.SaveCopyAs filePath
+    copyCreated = True
+    Set wbIndividual = Application.Workbooks.Open(Filename:=filePath, UpdateLinks:=0, ReadOnly:=False, _
+        IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+    If wbIndividual.ReadOnly Then Err.Raise TOOL_ERROR + 57, METHOD_NAME, "Individual copy opened read-only."
+    Call TrimIndividualDashboard(wbIndividual, accountantName, expectedCount)
+    Call WriteDashboardCaption(wbIndividual.Worksheets(SHEET_DASHBOARD), _
+        allocationDate, runStamp, accountantName)
+    Call RebindDashboardButtons(wbIndividual, wbIndividual.Name)
+    wbIndividual.Save
+    wbIndividual.Close SaveChanges:=False
+    Set wbIndividual = Nothing
+    copyComplete = True
+
+ExitPoint:
+    Call CloseWorkbookSafe(wbIndividual, cleanupFailed)
+    If copyCreated And Not copyComplete Then Call DeleteFileSafe(filePath)
+    Set fso = Nothing
+    If cleanupFailed And errNumber = 0 Then
+        errNumber = TOOL_ERROR + 58
+        errDescription = "Could not close the temporary individual workbook."
+    End If
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Generate one timestamped workbook for each unique accountant, including UNASSIGNED.
+'-------------------------------------------------------------------------------
+Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath As String, _
+                                   ByVal runStamp As String, ByVal allocationDate As Date, _
+                                   ByVal counts As Object)
+    Const METHOD_NAME As String = "GenerateAccountantFiles"
+    Dim accountant As Variant
+    Dim filePath As String
+    Dim completed As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For Each accountant In counts.Keys
+        completed = completed + 1
+        Application.StatusBar = "NeoAdvices: accountant file " & CStr(completed) & " / " & CStr(counts.Count)
+        filePath = UniqueOutputPath(folderPath, _
+            "NeoAdvices_" & CleanFileName(CStr(accountant)) & "_" & runStamp)
+        Call SaveIndividualCopy(wbMaster, filePath, CStr(accountant), _
+            CLng(counts(accountant)), allocationDate, runStamp)
+    Next accountant
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See the typed signature below.
+' Returns:       None
+' Description:   Save a timestamped Master snapshot with buttons bound to that snapshot.
+'-------------------------------------------------------------------------------
+Public Sub SaveTimestampedMaster(ByVal wbMaster As Workbook, ByVal folderPath As String, _
+                                 ByVal runStamp As String)
+    Const METHOD_NAME As String = "SaveTimestampedMaster"
+    Dim filePath As String
+    Dim wbCopy As Workbook
+    Dim copyCreated As Boolean
+    Dim copyComplete As Boolean
+    Dim cleanupFailed As Boolean
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    filePath = UniqueOutputPath(folderPath, "NeoAdvices_MASTER_" & runStamp)
+    wbMaster.SaveCopyAs filePath
+    copyCreated = True
+    Set wbCopy = Application.Workbooks.Open(Filename:=filePath, UpdateLinks:=0, ReadOnly:=False, _
+        IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+    If wbCopy.ReadOnly Then Err.Raise TOOL_ERROR + 59, METHOD_NAME, "Master snapshot opened read-only."
+    Call RebindDashboardButtons(wbCopy, wbCopy.Name)
+    wbCopy.Save
+    wbCopy.Close SaveChanges:=False
+    Set wbCopy = Nothing
+    copyComplete = True
+
+ExitPoint:
+    Call CloseWorkbookSafe(wbCopy, cleanupFailed)
+    If copyCreated And Not copyComplete Then Call DeleteFileSafe(filePath)
+    If cleanupFailed And errNumber = 0 Then
+        errNumber = TOOL_ERROR + 60
+        errDescription = "Could not close the Master snapshot."
+    End If
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
