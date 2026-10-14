@@ -1,83 +1,26 @@
 Option Explicit
 
 Private Const CLASS_NAME As String = "Dashboard_Sheet"
-
+Private pLastSelection As Range
 
 '-------------------------------------------------------------------------------
 ' Author:        Pawel Ligezka
 ' Creation date: 2026-10-14
-' Parameters:    See the typed signature below.
-' Returns:       None
-' Description:   Toggle one pseudo-checkbox inside the data body of tblDashboard.
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   Worksheet_SelectionChange - UPDATE06.
 '-------------------------------------------------------------------------------
-Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
-    Const METHOD_NAME As String = "Worksheet_BeforeDoubleClick"
-    Dim lo As ListObject
-    Dim candidate As ListObject
-    Dim statusCells As Range
-    Dim hit As Range
-    Dim tableRow As Range
-    Dim rowIndex As Long
-    Dim previousEvents As Boolean
-    Dim stateCaptured As Boolean
-    Dim cleanupFailed As Boolean
+Private Sub Worksheet_SelectionChange(ByVal Target As Range)
+    Const METHOD_NAME As String = "Worksheet_SelectionChange"
     Dim errNumber As Long
     Dim errDescription As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    Call ResetErrors
-    If Target.CountLarge = 1 Then
-        For Each candidate In Me.ListObjects
-            If candidate.Name = TABLE_DASHBOARD Then
-                Set lo = candidate
-                Exit For
-            End If
-        Next candidate
-        If Not lo Is Nothing Then
-            If Not lo.DataBodyRange Is Nothing Then
-                Set statusCells = lo.DataBodyRange.Columns(1).Resize(, 2)
-                Set hit = Application.Intersect(Target, statusCells)
-                If Not hit Is Nothing Then
-                    Cancel = True
-                    previousEvents = Application.EnableEvents
-                    stateCaptured = True
-                    Application.EnableEvents = False
-                    rowIndex = Target.Row - lo.DataBodyRange.Row + 1
-                    Set tableRow = lo.DataBodyRange.Rows(rowIndex)
-                    If Target.Column = lo.ListColumns("Done").Range.Column Then
-                        If CleanText(tableRow.Cells(1, 1).Value2) <> ChrW(&H2713) Then
-                            tableRow.Cells(1, 1).Value2 = ChrW(&H2713)
-                            tableRow.Cells(1, 2).Value2 = ChrW(&H2610)
-                        Else
-                            tableRow.Cells(1, 1).Value2 = ChrW(&H2610)
-                        End If
-                    Else
-                        If CleanText(tableRow.Cells(1, 2).Value2) <> "?" Then
-                            tableRow.Cells(1, 2).Value2 = "?"
-                            tableRow.Cells(1, 1).Value2 = ChrW(&H2610)
-                        Else
-                            tableRow.Cells(1, 2).Value2 = ChrW(&H2610)
-                        End If
-                    End If
-                    ' Formatting rules keep CANC above row fills and preserve movement fonts.
-                    Me.Calculate
-                End If
-            End If
-        End If
-    End If
+    Set pLastSelection = Target
 
 ExitPoint:
-    If stateCaptured Then Call RestoreEventsSafe(previousEvents, cleanupFailed)
-    Set tableRow = Nothing
-    Set hit = Nothing
-    Set statusCells = Nothing
-    Set lo = Nothing
-    Set candidate = Nothing
-    If cleanupFailed And errNumber = 0 Then errNumber = TOOL_ERROR + 42
-    If errNumber <> 0 Then
-        Call DisplayErrors
-    End If
+    If errNumber <> 0 Then Call DisplayErrors
     Exit Sub
 
 ErrHandler:
@@ -87,4 +30,138 @@ ErrHandler:
     GoTo ExitPoint
 End Sub
 
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   Worksheet_Deactivate - UPDATE06.
+'-------------------------------------------------------------------------------
+Private Sub Worksheet_Deactivate()
+    Const METHOD_NAME As String = "Worksheet_Deactivate"
+    Dim errNumber As Long
+    Dim errDescription As String
 
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set pLastSelection = Nothing
+
+ExitPoint:
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   Worksheet_BeforeDoubleClick - UPDATE06.
+'-------------------------------------------------------------------------------
+Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
+    Const METHOD_NAME As String = "Worksheet_BeforeDoubleClick"
+    Dim lo As ListObject
+    Dim candidate As ListObject
+    Dim hit As Range
+    Dim mode As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call ResetErrors
+    If Target.CountLarge = 1 Then
+        For Each candidate In Me.ListObjects
+            If candidate.Name = TABLE_DASHBOARD Then Set lo = candidate
+        Next candidate
+        If Not lo Is Nothing Then
+            If Not lo.DataBodyRange Is Nothing Then
+                Set hit = Application.Intersect(Target, lo.DataBodyRange.Columns(1).Resize(, 2))
+                If Not hit Is Nothing Then
+                    Cancel = True
+                    If Target.Column = lo.ListColumns("Done").Range.Column Then
+                        If CleanText(Target.Value2) <> ChrW(&H2713) Then mode = 1
+                    Else
+                        If CleanText(Target.Value2) <> "?" Then mode = 2
+                    End If
+                    Call ApplyNeoStatus(Me, Target, mode)
+                End If
+            End If
+        End If
+    End If
+
+ExitPoint:
+    Set hit = Nothing
+    Set candidate = Nothing
+    Set lo = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   Worksheet_BeforeRightClick - UPDATE06.
+'-------------------------------------------------------------------------------
+Private Sub Worksheet_BeforeRightClick(ByVal Target As Range, Cancel As Boolean)
+    Const METHOD_NAME As String = "Worksheet_BeforeRightClick"
+    Dim lo As ListObject
+    Dim candidate As ListObject
+    Dim hit As Range
+    Dim requested As Range
+    Dim overlap As Range
+    Dim mode As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call ResetErrors
+    For Each candidate In Me.ListObjects
+        If candidate.Name = TABLE_DASHBOARD Then Set lo = candidate
+    Next candidate
+    If Not lo Is Nothing Then
+        If Not lo.DataBodyRange Is Nothing Then
+            Set hit = Application.Intersect(Target, lo.DataBodyRange)
+            If Not hit Is Nothing Then
+                Set requested = Target
+                If Not pLastSelection Is Nothing Then
+                    Set overlap = Application.Intersect(Target, pLastSelection)
+                    If Not overlap Is Nothing Then Set requested = pLastSelection
+                End If
+                Cancel = True
+                mode = ChooseNeoStatus(Me.Parent)
+                If mode >= 0 Then Call ApplyNeoStatus(Me, requested, mode)
+            End If
+        End If
+    End If
+
+ExitPoint:
+    Set overlap = Nothing
+    Set requested = Nothing
+    Set hit = Nothing
+    Set candidate = Nothing
+    Set lo = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
