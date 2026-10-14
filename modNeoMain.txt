@@ -63,7 +63,7 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       None
-' Description:   Reject invalid or user-owned open inputs before opening any workbook.
+' Description:   Validate selected file paths without rejecting open input workbooks.
 '-------------------------------------------------------------------------------
 Private Sub ValidateInputPaths(ByVal neoPath As String, ByVal repartitionPath As String)
     Const METHOD_NAME As String = "ValidateInputPaths"
@@ -84,8 +84,6 @@ Private Sub ValidateInputPaths(ByVal neoPath As String, ByVal repartitionPath As
     If Not fso.FileExists(neoPath) Or Not fso.FileExists(repartitionPath) Then
         Err.Raise TOOL_ERROR + 80, METHOD_NAME, "An input file no longer exists."
     End If
-    Call RequireClosedPath(neoPath)
-    Call RequireClosedPath(repartitionPath)
 
 ExitPoint:
     Set fso = Nothing
@@ -114,6 +112,8 @@ Public Sub RunNeoAdvices()
     Dim wbMaster As Workbook
     Dim wbNeo As Workbook
     Dim wbRepartition As Workbook
+    Dim neoOpenedByTool As Boolean
+    Dim repartitionOpenedByTool As Boolean
     Dim wsNeoInput As Worksheet
     Dim wsRepInput As Worksheet
     Dim wsNeo As Worksheet
@@ -162,10 +162,8 @@ Public Sub RunNeoAdvices()
         Call ValidateInputPaths(neoPath, repPath)
         Call SuspendExcel
         Application.StatusBar = "NeoAdvices: validating inputs..."
-        Set wbNeo = Application.Workbooks.Open(Filename:=neoPath, UpdateLinks:=0, ReadOnly:=True, _
-            IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
-        Set wbRepartition = Application.Workbooks.Open(Filename:=repPath, UpdateLinks:=0, ReadOnly:=True, _
-            IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+        Set wbNeo = AcquireInputWorkbook(neoPath, neoOpenedByTool)
+        Set wbRepartition = AcquireInputWorkbook(repPath, repartitionOpenedByTool)
         If wbNeo.Date1904 <> wbMaster.Date1904 Or wbRepartition.Date1904 <> wbMaster.Date1904 Then
             Err.Raise TOOL_ERROR + 81, METHOD_NAME, "Inputs and Master must use the same Excel date system."
         End If
@@ -214,6 +212,13 @@ Public Sub RunNeoAdvices()
                 wsRep.Visible = xlSheetVisible
                 Call CopyInputSnapshot(wsRepInput, wsRep, repLastRow, repLastColumn)
                 Call CopyInputSnapshot(wsNeoInput, wsNeo, neoLastRow, neoLastColumn)
+                Set wsNeoInput = Nothing
+                Set wsRepInput = Nothing
+                Call ReleaseInputWorkbookSafe(wbNeo, neoOpenedByTool, cleanupFailed)
+                Call ReleaseInputWorkbookSafe(wbRepartition, repartitionOpenedByTool, cleanupFailed)
+                If cleanupFailed Then
+                    Err.Raise TOOL_ERROR + 94, METHOD_NAME, "Could not release a tool-opened input."
+                End If
                 wsNeo.Columns("A:G").Insert Shift:=xlToRight
                 wsNeo.Columns("A:G").NumberFormat = "@"
                 wsNeo.Cells(1, 1).Resize(UBound(enriched, 1), UBound(enriched, 2)).Value2 = enriched
@@ -221,10 +226,6 @@ Public Sub RunNeoAdvices()
                 Call ApplyDataFormatting(wsNeo, 1, UBound(enriched, 1), UBound(enriched, 2), False)
                 Call FitDataColumns(wsNeo, 1, UBound(enriched, 1), UBound(enriched, 2), False)
                 Call BuildDashboard(wbMaster, enriched, allocationDate, runStamp)
-                wbNeo.Close SaveChanges:=False
-                Set wbNeo = Nothing
-                wbRepartition.Close SaveChanges:=False
-                Set wbRepartition = Nothing
                 Set counts = AccountantCounts(wsNeo)
                 If counts.Exists(UNASSIGNED_NAME) Then unassignedCount = CLng(counts(UNASSIGNED_NAME))
                 ' Save workbooks with the user's calculation mode, not the temporary manual mode.
@@ -240,8 +241,10 @@ Public Sub RunNeoAdvices()
     End If
 
 ExitPoint:
-    Call CloseWorkbookSafe(wbNeo, cleanupFailed)
-    Call CloseWorkbookSafe(wbRepartition, cleanupFailed)
+    Set wsNeoInput = Nothing
+    Set wsRepInput = Nothing
+    Call ReleaseInputWorkbookSafe(wbNeo, neoOpenedByTool, cleanupFailed)
+    Call ReleaseInputWorkbookSafe(wbRepartition, repartitionOpenedByTool, cleanupFailed)
     Call RestoreExcelStateSafe(state, cleanupFailed)
     If cleanupFailed And errNumber = 0 Then
         errNumber = TOOL_ERROR + 84
@@ -277,4 +280,5 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
+
 
