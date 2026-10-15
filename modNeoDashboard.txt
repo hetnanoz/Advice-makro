@@ -1051,3 +1051,4 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
+
