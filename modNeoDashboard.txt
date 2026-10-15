@@ -142,7 +142,7 @@ Public Sub WriteDashboardCaption(ByVal ws As Worksheet, ByVal allocationDate As 
     With ws.Cells(10, 1)
         .Value2 = "NeoAdvices " & TOOL_VERSION & " | " & viewName & " | Allocation: " & _
             Format$(allocationDate, "dd/mm/yyyy") & " | Run: " & runStamp & " | " & BatModeCaption() & _
-            " | Layout UPDATE17 | Done / Doubt: double-click a box"
+            " | Layout UPDATE19 | Done / Doubt: double-click a box"
         .Font.Name = "Calibri"
         .Font.Size = 10
         .Font.Bold = True
@@ -213,16 +213,16 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
         Call CreateNativeTableSlicer(wb, ws, lo, CStr(fields(fieldIndex)), _
             ws.Columns(3).Left + 6 + fieldIndex * 190)
     Next fieldIndex
-    captions = Array("ALL", "Cash", "SecCash", "Security", "SecCash + Security")
-    macroNames = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", "FilterSecCashSecurity")
-    lastButton = 4
+    captions = Array("ALL", "Cash", "SecCash", "Security", "Other", "SecCash + Security + Other")
+    macroNames = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", _
+        "FilterOther", "FilterSecCashSecurity")
+    lastButton = UBound(captions)
     leftPosition = ws.Columns(3).Left + 6
     topPosition = ws.Rows(9).Top + 1
     For buttonIndex = 0 To lastButton
         stepDescription = "Create button " & CStr(captions(buttonIndex))
-        buttonWidth = 104
-        If buttonIndex = 4 Then buttonWidth = 170
-        If buttonIndex = 5 Then buttonWidth = 132
+        buttonWidth = 88
+        If buttonIndex = 5 Then buttonWidth = 220
         Set button = ws.Shapes.AddShape(msoShapeRoundedRectangle, leftPosition, topPosition, buttonWidth, 21)
         button.Name = "btnNeo_" & CStr(buttonIndex + 1)
         stepDescription = "Format button " & CStr(captions(buttonIndex))
@@ -284,7 +284,8 @@ Public Sub RebindDashboardButtons(ByVal wb As Workbook, ByVal savedFileName As S
     Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
     ws.Shapes("btnNeo_ColumnSettings").OnAction = _
         "'" & Replace(savedFileName, "'", "''") & "'!OpenNeoColumnSettings"
-    names = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", "FilterSecCashSecurity")
+    names = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", _
+        "FilterOther", "FilterSecCashSecurity")
     For itemIndex = LBound(names) To UBound(names)
         ws.Shapes("btnNeo_" & CStr(itemIndex + 1)).OnAction = _
             "'" & Replace(savedFileName, "'", "''") & "'!" & CStr(names(itemIndex))
@@ -335,8 +336,10 @@ Public Sub ApplyTypeFilter(ByVal wb As Workbook, ByVal mode As Long)
         Case 3
             lo.Range.AutoFilter Field:=fieldIndex, Criteria1:="Security"
         Case 4
-            lo.Range.AutoFilter Field:=fieldIndex, Criteria1:=Array("SecCash", "Security"), _
+            lo.Range.AutoFilter Field:=fieldIndex, Criteria1:=Array("SecCash", "Security", "Other"), _
                 Operator:=xlFilterValues
+        Case 5
+            lo.Range.AutoFilter Field:=fieldIndex, Criteria1:="Other"
         Case Else
             Err.Raise TOOL_ERROR + 40, METHOD_NAME, "Unknown Type Group filter mode."
     End Select
@@ -1052,3 +1055,36 @@ ErrHandler:
     GoTo ExitPoint
 End Sub
 
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    None.
+' Returns:       None.
+' Description:   UPDATE19: filter Other instructions only.
+'-------------------------------------------------------------------------------
+Public Sub FilterOther()
+    Const METHOD_NAME As String = "FilterOther"
+    Dim wb As Workbook
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wb = Application.ActiveWorkbook
+    Call ResetErrors
+    If wb Is Nothing Then Err.Raise TOOL_ERROR + 41, METHOD_NAME, "No active workbook."
+    Call ApplyTypeFilter(wb, 5)
+
+ExitPoint:
+    Set wb = Nothing
+    If errNumber <> 0 Then
+        Call DisplayErrors
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
