@@ -28,7 +28,8 @@ Public Sub BuildProgressCounters(ByVal ws As Worksheet)
     positions = Array(6, 326, 596)
     widths = Array(310, 260, 350)
     For itemIndex = 0 To 2
-        Set box = ws.Shapes.AddShape(msoShapeRoundedRectangle, CDbl(positions(itemIndex)), 4, _
+        Set box = ws.Shapes.AddShape(msoShapeRoundedRectangle, _
+            ws.Columns(3).Left + CDbl(positions(itemIndex)), 4, _
             CDbl(widths(itemIndex)), 63)
         box.Name = "neoProgress_" & CStr(itemIndex)
         box.AlternativeText = CStr(titles(itemIndex)) & " - completed / total for the whole file"
