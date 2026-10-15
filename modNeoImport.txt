@@ -456,9 +456,10 @@ Public Function BuildEnrichedData(ByVal ws As Worksheet, ByRef sourceData As Var
             Case "CASH": groupText = "Cash"
             Case "SECCASH": groupText = "SecCash"
             Case "SECURITY": groupText = "Security"
+            Case "OTHER": groupText = "Other"
             Case Else
                 Err.Raise TOOL_ERROR + 29, METHOD_NAME, _
-                    "Unknown Type Group at row " & CStr(rowIndex) & "."
+                    "Unknown Type Group at row " & CStr(rowIndex) & ": [" & groupText & "]."
         End Select
         result(rowIndex, groupColumn + ADDED_COLUMNS) = groupText
         key = CleanText(sourceData(rowIndex, keyColumn))
