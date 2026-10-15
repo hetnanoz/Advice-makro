@@ -91,6 +91,10 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
         ws.Cells(DASH_HEADER_ROW, columnIndex).PasteSpecial Paste:=xlPasteFormats
     Next columnIndex
     Application.CutCopyMode = False
+    If CStr(lo.HeaderRowRange.Cells(1, 3).Value2) <> HDR_FUND Or _
+       CStr(lo.HeaderRowRange.Cells(1, 4).Value2) <> HDR_GROUP Then
+        Err.Raise TOOL_ERROR + 127, METHOD_NAME, "UPDATE14: Dashboard column order validation failed."
+    End If
     Call SortDashboardRows(lo)
     Call FormatHeader(lo.HeaderRowRange)
     Call ApplyDataFormatting(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
@@ -136,7 +140,7 @@ Public Sub WriteDashboardCaption(ByVal ws As Worksheet, ByVal allocationDate As 
     With ws.Cells(10, 1)
         .Value2 = "NeoAdvices " & TOOL_VERSION & " | " & viewName & " | Allocation: " & _
             Format$(allocationDate, "dd/mm/yyyy") & " | Run: " & runStamp & " | " & BatModeCaption() & _
-            " | Done / Doubt: double-click a box"
+            " | Layout UPDATE14 | Done / Doubt: double-click a box"
         .Font.Name = "Calibri"
         .Font.Size = 10
         .Font.Bold = True
@@ -237,6 +241,7 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
     Next buttonIndex
     stepDescription = "Build progress counters"
     Call BuildProgressCounters(ws)
+    Call FreezeDashboardStatusColumns(ws)
 
 ExitPoint:
     Set button = Nothing
@@ -952,3 +957,50 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    ws: Dashboard worksheet in the explicitly supplied workbook.
+' Returns:       None.
+' Description:   Freeze A/B only in windows currently displaying this Dashboard.
+'-------------------------------------------------------------------------------
+Public Sub FreezeDashboardStatusColumns(ByVal ws As Worksheet)
+    Const METHOD_NAME As String = "FreezeDashboardStatusColumns"
+    Dim wbMaster As Workbook
+    Dim view As Window
+    Dim shownSheet As Object
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wbMaster = ws.Parent
+    If ws.Name = SHEET_DASHBOARD Then
+        For Each view In wbMaster.Windows
+            Set shownSheet = view.ActiveSheet
+            If shownSheet Is ws Then
+                If Not view.FreezePanes Or view.SplitColumn <> 2 Then
+                    view.FreezePanes = False
+                    view.SplitColumn = 2
+                    view.FreezePanes = True
+                End If
+            End If
+        Next view
+    End If
+
+ExitPoint:
+    Set shownSheet = Nothing
+    Set view = Nothing
+    Set wbMaster = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
