@@ -8,7 +8,7 @@ Private Const CLASS_NAME As String = "modNeoExport"
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       String
-' Description:   Create a unique staging folder; incomplete batches retain their explicit status.
+' Description:   UPDATE11: create a stable output folder with an incomplete-run marker.
 '-------------------------------------------------------------------------------
 Public Function CreateRunFolder(ByVal parentFolder As String, ByVal runStamp As String) As String
     Const METHOD_NAME As String = "CreateRunFolder"
@@ -24,16 +24,17 @@ Public Function CreateRunFolder(ByVal parentFolder As String, ByVal runStamp As 
     If Not fso.FolderExists(parentFolder) Then
         Err.Raise TOOL_ERROR + 50, METHOD_NAME, "The output folder does not exist."
     End If
-    candidate = fso.BuildPath(parentFolder, "NeoAdvices_IN_PROGRESS_" & runStamp)
+    candidate = fso.BuildPath(parentFolder, "NeoAdvices_" & runStamp)
     Do While fso.FolderExists(candidate)
         suffix = suffix + 1
         candidate = fso.BuildPath(parentFolder, _
-            "NeoAdvices_IN_PROGRESS_" & runStamp & "_" & Format$(suffix, "000"))
+            "NeoAdvices_" & runStamp & "_" & Format$(suffix, "000"))
     Loop
     If Len(candidate) > 125 Then
         Err.Raise TOOL_ERROR + 51, METHOD_NAME, "Choose a shorter output folder path."
     End If
     fso.CreateFolder candidate
+    fso.CreateTextFile(fso.BuildPath(candidate, "IN_PROGRESS.txt"), False).Close
     CreateRunFolder = candidate
 
 ExitPoint:
@@ -56,29 +57,31 @@ End Function
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       String
-' Description:   Publish the closed, complete output batch by renaming its staging folder.
+' Description:   UPDATE11: mark a completed batch without renaming its output folder.
 '-------------------------------------------------------------------------------
 Public Function FinalizeRunFolder(ByVal stagingFolder As String) As String
     Const METHOD_NAME As String = "FinalizeRunFolder"
     Dim fso As Object
-    Dim finalPath As String
-    Dim basePath As String
-    Dim suffix As Long
+    Dim pendingPath As String
+    Dim completePath As String
     Dim errNumber As Long
     Dim errDescription As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     Set fso = CreateObject("Scripting.FileSystemObject")
-    basePath = fso.BuildPath(fso.GetParentFolderName(stagingFolder), _
-        Replace(fso.GetFileName(stagingFolder), "IN_PROGRESS_", vbNullString, 1, 1, vbBinaryCompare))
-    finalPath = basePath
-    Do While fso.FolderExists(finalPath)
-        suffix = suffix + 1
-        finalPath = basePath & "_" & Format$(suffix, "000")
-    Loop
-    Name stagingFolder As finalPath
-    FinalizeRunFolder = finalPath
+    If Not fso.FolderExists(stagingFolder) Then
+        Err.Raise TOOL_ERROR + 50, METHOD_NAME, "The output folder does not exist."
+    End If
+    pendingPath = fso.BuildPath(stagingFolder, "IN_PROGRESS.txt")
+    completePath = fso.BuildPath(stagingFolder, "COMPLETE.txt")
+    If Not fso.FileExists(pendingPath) Then
+        Err.Raise TOOL_ERROR + 51, METHOD_NAME, "The incomplete-run marker is missing."
+    End If
+    ' Only the normal success path calls this function, after all output workbooks are closed.
+    ' Publish completion last: a failed marker operation must still propagate to the caller.
+    Name pendingPath As completePath
+    FinalizeRunFolder = stagingFolder
 
 ExitPoint:
     Set fso = Nothing
