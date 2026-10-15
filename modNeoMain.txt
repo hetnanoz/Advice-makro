@@ -212,6 +212,7 @@ Public Sub RunNeoAdvices()
             If wbMaster.ReadOnly Then
                 Err.Raise TOOL_ERROR + 141, METHOD_NAME, "Output Master opened read-only."
             End If
+            Call SetLayoutValue(wbMaster, "Folder", LayoutDefaultsFolder(wbLauncher))
             wbMaster.Worksheets(SHEET_RUN).Name = SHEET_DASHBOARD
             wbMaster.Names(LAUNCHER_MARKER).Delete
             wbMaster.Names.Add Name:=RESULT_MARKER, RefersTo:="=TRUE", Visible:=False
