@@ -7,7 +7,7 @@ Private Const CLASS_NAME As String = "modNeoProgress"
 ' Creation date: 2026-10-15
 ' Parameters:    See typed signature.
 ' Returns:       See typed signature.
-' Description:   BuildProgressCounters - UPDATE09.
+' Description:   BuildProgressCounters - UPDATE12.
 '-------------------------------------------------------------------------------
 Public Sub BuildProgressCounters(ByVal ws As Worksheet)
     Const METHOD_NAME As String = "BuildProgressCounters"
@@ -56,7 +56,7 @@ End Sub
 ' Creation date: 2026-10-15
 ' Parameters:    See typed signature.
 ' Returns:       See typed signature.
-' Description:   UpdateProgressCounters - UPDATE09.
+' Description:   UpdateProgressCounters - UPDATE12.
 '-------------------------------------------------------------------------------
 Public Sub UpdateProgressCounters(ByVal ws As Worksheet)
     Const METHOD_NAME As String = "UpdateProgressCounters"
@@ -76,6 +76,9 @@ Public Sub UpdateProgressCounters(ByVal ws As Worksheet)
     Dim groupName As String
     Dim mark As Boolean
     Dim counterText As String
+    Dim titleBox As Shape
+    Dim candidateShape As Shape
+    Dim titleName As String
     Dim errNumber As Long
     Dim errDescription As String
 
@@ -114,36 +117,110 @@ Public Sub UpdateProgressCounters(ByVal ws As Worksheet)
         titles = Array("All", "Cash", "Security + SecCash")
         For itemIndex = 0 To 2
             Set box = ws.Shapes("neoProgress_" & CStr(itemIndex))
-            counterText = CStr(titles(itemIndex)) & vbLf & _
-                CStr(done(itemIndex)) & " / " & CStr(total(itemIndex))
-            With box.TextFrame
-                .Characters.Text = counterText
-                .Characters.Font.Name = "Calibri"
-                .Characters.Font.Bold = True
-                .Characters.Font.Color = RGB(31, 55, 79)
-                .Characters.Font.Size = 24
-                If itemIndex = 0 Then .Characters.Font.Size = 34
-                .Characters(1, Len(CStr(titles(itemIndex)))).Font.Size = 11
-                .HorizontalAlignment = xlHAlignCenter
-                .VerticalAlignment = xlVAlignCenter
-                .MarginTop = 2
-                .MarginBottom = 2
+            counterText = CStr(done(itemIndex)) & " / " & CStr(total(itemIndex))
+            ' Separate title and value prevent multiline text from being clipped by Excel.
+            titleName = "neoProgress_title_" & CStr(itemIndex)
+            Set titleBox = Nothing
+            For Each candidateShape In ws.Shapes
+                If candidateShape.Name = titleName Then Set titleBox = candidateShape
+            Next candidateShape
+            If titleBox Is Nothing Then
+                Set titleBox = ws.Shapes.AddTextbox(msoTextOrientationHorizontal, _
+                    box.Left, box.Top + 2, box.Width, 17)
+                titleBox.Name = titleName
+            End If
+            With titleBox
+                .Left = box.Left
+                .Top = box.Top + 2
+                .Width = box.Width
+                .Height = 17
+                .Placement = xlFreeFloating
+                .Line.Visible = msoFalse
+                .Fill.Visible = msoFalse
+                .ZOrder msoBringToFront
+            End With
+            With titleBox.TextFrame2
+                .AutoSize = msoAutoSizeNone
+                .WordWrap = msoFalse
+                .MarginTop = 0
+                .MarginBottom = 0
+                .TextRange.Text = CStr(titles(itemIndex))
+                .TextRange.Font.Name = "Calibri"
+                .TextRange.Font.Size = 11
+                .TextRange.Font.Bold = msoTrue
+                .TextRange.Font.Fill.ForeColor.RGB = RGB(31, 55, 79)
+                .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+            End With
+            With box.TextFrame2
+                .AutoSize = msoAutoSizeNone
+                .WordWrap = msoFalse
+                .MarginTop = 19
+                .MarginBottom = 0
+                .MarginLeft = 4
+                .MarginRight = 4
+                .VerticalAnchor = msoAnchorMiddle
+                .TextRange.Text = counterText
+                .TextRange.Font.Name = "Calibri"
+                .TextRange.Font.Bold = msoTrue
+                .TextRange.Font.Fill.ForeColor.RGB = RGB(31, 55, 79)
+                .TextRange.Font.Size = 24
+                If itemIndex = 0 Then .TextRange.Font.Size = 30
+                .TextRange.ParagraphFormat.Alignment = msoAlignCenter
+                .TextRange.ParagraphFormat.SpaceBefore = 0
+                .TextRange.ParagraphFormat.SpaceAfter = 0
             End With
             box.Fill.ForeColor.RGB = RGB(230, 240, 255)
             If total(itemIndex) > 0 And done(itemIndex) = total(itemIndex) Then
                 box.Fill.ForeColor.RGB = RGB(198, 239, 206)
-                box.TextFrame.Characters.Font.Color = RGB(0, 100, 0)
+                box.TextFrame2.TextRange.Font.Fill.ForeColor.RGB = RGB(0, 100, 0)
             End If
         Next itemIndex
     End If
 
 ExitPoint:
+    Set titleBox = Nothing
+    Set candidateShape = Nothing
     Set box = Nothing
     Set candidate = Nothing
     Set lo = Nothing
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    None.
+' Returns:       None.
+' Description:   Refresh existing output counters after installing UPDATE12.
+'-------------------------------------------------------------------------------
+Public Sub RefreshNeoProgress()
+    Const METHOD_NAME As String = "RefreshNeoProgress"
+    Dim wbMaster As Workbook
+    Dim ws As Worksheet
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wbMaster = Application.ActiveWorkbook
+    Call ResetErrors
+    If wbMaster Is Nothing Then Err.Raise TOOL_ERROR + 125, METHOD_NAME, "No active workbook."
+    Set ws = RequiredSheet(wbMaster, SHEET_DASHBOARD)
+    Call BuildProgressCounters(ws)
+
+ExitPoint:
+    Set ws = Nothing
+    Set wbMaster = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
     Exit Sub
 
 ErrHandler:
