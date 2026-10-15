@@ -168,7 +168,12 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
     If lastRow >= firstRow Then
         Set body = ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, lastColumn))
         body.FormatConditions.Delete
-        body.Interior.Color = RGB(255, 255, 255)
+        If isDashboard Then
+            ' UPDATE18: no base fill; status/category rules provide all Dashboard backgrounds.
+            body.Interior.Pattern = xlNone
+        Else
+            body.Interior.Color = RGB(255, 255, 255)
+        End If
         body.Font.Color = RGB(0, 0, 0)
         body.Font.Bold = False
         body.Font.Name = "Calibri"
@@ -189,9 +194,11 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
             groupAddress = ws.Cells(firstRow, groupIndex).Address(False, True)
             doneAddress = ws.Cells(firstRow, 1).Address(False, True)
             doubtAddress = ws.Cells(firstRow, 2).Address(False, True)
-            formula = "=(" & doneAddress & "<>""" & ChrW(&H2713) & """)*(" & _
-                doubtAddress & "<>""?"")*(" & groupAddress & "=""Cash"")"
-            Call AddFillRule(body, formula, RGB(230, 240, 255))
+            ' Cash has no default fill; retain the higher-priority Done/Doubt/CANC rules.
+            For Each header In Array(HDR_FUND, HDR_ISIN)
+                quantityIndex = GetColumnIndexByHeader(ws, headerRow, CStr(header))
+                ws.Range(ws.Cells(firstRow, quantityIndex), ws.Cells(lastRow, quantityIndex)).Font.Bold = True
+            Next header
             formula = "=(" & doneAddress & "<>""" & ChrW(&H2713) & """)*(" & _
                 doubtAddress & "<>""?"")*((" & groupAddress & "=""SecCash"")+(" & _
                 groupAddress & "=""Security""))"
