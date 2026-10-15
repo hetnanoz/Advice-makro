@@ -1,0 +1,154 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoProgress"
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   BuildProgressCounters - UPDATE09.
+'-------------------------------------------------------------------------------
+Public Sub BuildProgressCounters(ByVal ws As Worksheet)
+    Const METHOD_NAME As String = "BuildProgressCounters"
+    Dim itemIndex As Long
+    Dim box As Shape
+    Dim titles As Variant
+    Dim positions As Variant
+    Dim widths As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For itemIndex = ws.Shapes.Count To 1 Step -1
+        If Left$(ws.Shapes(itemIndex).Name, 12) = "neoProgress_" Then ws.Shapes(itemIndex).Delete
+    Next itemIndex
+    titles = Array("All", "Cash", "Security + SecCash")
+    positions = Array(6, 326, 596)
+    widths = Array(310, 260, 350)
+    For itemIndex = 0 To 2
+        Set box = ws.Shapes.AddShape(msoShapeRoundedRectangle, CDbl(positions(itemIndex)), 4, _
+            CDbl(widths(itemIndex)), 63)
+        box.Name = "neoProgress_" & CStr(itemIndex)
+        box.AlternativeText = CStr(titles(itemIndex)) & " - completed / total for the whole file"
+        box.Placement = xlFreeFloating
+        box.Line.Visible = msoFalse
+    Next itemIndex
+    Call UpdateProgressCounters(ws)
+
+ExitPoint:
+    Set box = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UpdateProgressCounters - UPDATE09.
+'-------------------------------------------------------------------------------
+Public Sub UpdateProgressCounters(ByVal ws As Worksheet)
+    Const METHOD_NAME As String = "UpdateProgressCounters"
+    Dim lo As ListObject
+    Dim candidate As ListObject
+    Dim box As Shape
+    Dim values As Variant
+    Dim titles As Variant
+    Dim total(0 To 2) As Long
+    Dim done(0 To 2) As Long
+    Dim groupIndex As Long
+    Dim doneIndex As Long
+    Dim rowIndex As Long
+    Dim category As Long
+    Dim itemIndex As Long
+    Dim counterCount As Long
+    Dim groupName As String
+    Dim mark As Boolean
+    Dim counterText As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For Each candidate In ws.ListObjects
+        If candidate.Name = TABLE_DASHBOARD Then Set lo = candidate
+    Next candidate
+    For Each box In ws.Shapes
+        Select Case box.Name
+            Case "neoProgress_0", "neoProgress_1", "neoProgress_2"
+                counterCount = counterCount + 1
+        End Select
+    Next box
+    If Not lo Is Nothing And counterCount = 3 Then
+        groupIndex = lo.ListColumns(HDR_GROUP).Index
+        doneIndex = lo.ListColumns("Done").Index
+        If Not lo.DataBodyRange Is Nothing Then
+            values = lo.DataBodyRange.Value2
+            For rowIndex = 1 To UBound(values, 1)
+                total(0) = total(0) + 1
+                mark = (CleanText(values(rowIndex, doneIndex)) = ChrW(&H2713))
+                If mark Then done(0) = done(0) + 1
+                groupName = UCase$(CleanText(values(rowIndex, groupIndex)))
+                category = -1
+                Select Case groupName
+                    Case "CASH": category = 1
+                    Case "SECURITY", "SECCASH": category = 2
+                End Select
+                If category > 0 Then
+                    total(category) = total(category) + 1
+                    If mark Then done(category) = done(category) + 1
+                End If
+            Next rowIndex
+        End If
+        titles = Array("All", "Cash", "Security + SecCash")
+        For itemIndex = 0 To 2
+            Set box = ws.Shapes("neoProgress_" & CStr(itemIndex))
+            counterText = CStr(titles(itemIndex)) & vbLf & _
+                CStr(done(itemIndex)) & " / " & CStr(total(itemIndex))
+            With box.TextFrame
+                .Characters.Text = counterText
+                .Characters.Font.Name = "Calibri"
+                .Characters.Font.Bold = True
+                .Characters.Font.Color = RGB(31, 55, 79)
+                .Characters.Font.Size = 24
+                If itemIndex = 0 Then .Characters.Font.Size = 34
+                .Characters(1, Len(CStr(titles(itemIndex)))).Font.Size = 11
+                .HorizontalAlignment = xlHAlignCenter
+                .VerticalAlignment = xlVAlignCenter
+                .MarginTop = 2
+                .MarginBottom = 2
+            End With
+            box.Fill.ForeColor.RGB = RGB(230, 240, 255)
+            If total(itemIndex) > 0 And done(itemIndex) = total(itemIndex) Then
+                box.Fill.ForeColor.RGB = RGB(198, 239, 206)
+                box.TextFrame.Characters.Font.Color = RGB(0, 100, 0)
+            End If
+        Next itemIndex
+    End If
+
+ExitPoint:
+    Set box = Nothing
+    Set candidate = Nothing
+    Set lo = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
