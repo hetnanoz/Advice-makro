@@ -32,7 +32,14 @@ Private Sub ValidateMaster(ByVal wb As Workbook)
     If HasCopyMarker(wb) Then
         Err.Raise TOOL_ERROR + 75, METHOD_NAME, "Run the generator from the Master, not an accountant copy."
     End If
-    required = Array(SHEET_DASHBOARD, SHEET_NEO, SHEET_REPARTITION)
+    If HasNeoFlag(wb, RESULT_MARKER) Then
+        Err.Raise TOOL_ERROR + 139, METHOD_NAME, "Run the generator from the launcher, not the output Master."
+    End If
+    Set ws = LauncherSheet(wb)
+    If ws.ProtectContents Or ws.ProtectDrawingObjects Then
+        Err.Raise TOOL_ERROR + 140, METHOD_NAME, "The launcher sheet is protected."
+    End If
+    required = Array(SHEET_NEO, SHEET_REPARTITION)
     For Each name In required
         Set ws = RequiredSheet(wb, CStr(name))
         If ws.ProtectContents Or ws.ProtectDrawingObjects Then
@@ -110,6 +117,8 @@ End Sub
 Public Sub RunNeoAdvices()
     Const METHOD_NAME As String = "RunNeoAdvices"
     Dim wbMaster As Workbook
+    Dim wbLauncher As Workbook
+    Dim masterPath As String
     Dim wbNeo As Workbook
     Dim wbRepartition As Workbook
     Dim neoOpenedByTool As Boolean
@@ -139,19 +148,17 @@ Public Sub RunNeoAdvices()
     Dim allocations As Object
     Dim counts As Object
     Dim selected As Boolean
-    Dim proceed As Boolean
     Dim cleanupFailed As Boolean
     Dim completed As Boolean
     Dim unassignedCount As Long
-    Dim progressAnswer As VbMsgBoxResult
     Dim errNumber As Long
     Dim errDescription As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    Set wbMaster = Application.ActiveWorkbook
+    Set wbLauncher = Application.ActiveWorkbook
     Call ResetErrors
-    Call ValidateMaster(wbMaster)
+    Call ValidateMaster(wbLauncher)
     ' User-requested persistent repair: start each run with Dashboard interaction enabled.
     ' Capture this intended baseline before temporarily suspending events for processing.
     Application.EnableEvents = True
@@ -167,7 +174,7 @@ Public Sub RunNeoAdvices()
         Application.StatusBar = "NeoAdvices: validating inputs..."
         Set wbNeo = AcquireInputWorkbook(neoPath, neoOpenedByTool)
         Set wbRepartition = AcquireInputWorkbook(repPath, repartitionOpenedByTool)
-        If wbNeo.Date1904 <> wbMaster.Date1904 Or wbRepartition.Date1904 <> wbMaster.Date1904 Then
+        If wbNeo.Date1904 <> wbLauncher.Date1904 Or wbRepartition.Date1904 <> wbLauncher.Date1904 Then
             Err.Raise TOOL_ERROR + 81, METHOD_NAME, "Inputs and Master must use the same Excel date system."
         End If
         Set wsNeoInput = ResolveInputSheet(wbNeo, True)
@@ -189,57 +196,66 @@ Public Sub RunNeoAdvices()
             sourceRep = wsRepInput.Cells(1, 1).Resize(repLastRow, repLastColumn).Value2
             Set allocations = BuildAllocationDictionary(sourceRep, allocationColumn)
             enriched = BuildEnrichedData(wsNeoInput, sourceNeo, allocations)
-            proceed = True
-            If HasExistingProgress(wbMaster) Then
-                progressAnswer = MsgBox("Obecny Dashboard zawiera Done/Doubt." & vbCrLf & _
-                    "Nowy import wyzeruje te oznaczenia. Kontynuowac?" & vbCrLf & _
-                    "Przed zmiana zostanie zapisana kopia Mastera.", _
-                    vbYesNo + vbExclamation + vbDefaultButton2, "Reset Dashboardu")
-                proceed = (progressAnswer = vbYes)
+            runStamp = Format$(Now, "ddmmyyyyhhnnss")
+            stagingFolder = CreateRunFolder(outputFolder, runStamp)
+            If Not HasNeoFlag(wbLauncher, LAUNCHER_MARKER) Then
+                backupPath = UniqueOutputPath(stagingFolder, "Macro_BEFORE_LAUNCHER_" & runStamp)
+                wbLauncher.SaveCopyAs backupPath
+                Call PrepareNeoLauncher(wbLauncher)
+            Else
+                wbLauncher.Save
             End If
-            If proceed Then
-                runStamp = Format$(Now, "ddmmyyyyhhnnss")
-                stagingFolder = CreateRunFolder(outputFolder, runStamp)
-                backupPath = UniqueOutputPath(stagingFolder, "Master_BEFORE_RUN_" & runStamp)
-                wbMaster.SaveCopyAs backupPath
-                Application.StatusBar = "NeoAdvices: rebuilding Master..."
-                Set wsNeo = RequiredSheet(wbMaster, SHEET_NEO)
-                Set wsRep = RequiredSheet(wbMaster, SHEET_REPARTITION)
-                Set wsDashboard = RequiredSheet(wbMaster, SHEET_DASHBOARD)
-                Call RemoveAllSlicerCaches(wbMaster)
-                Call ClearWorksheetView(wsDashboard)
-                Call ClearWorksheetView(wsNeo)
-                Call ClearWorksheetView(wsRep)
-                wsDashboard.Visible = xlSheetVisible
-                wsNeo.Visible = xlSheetVisible
-                wsRep.Visible = xlSheetVisible
-                Call CopyInputSnapshot(wsRepInput, wsRep, repLastRow, repLastColumn)
-                Call CopyInputSnapshot(wsNeoInput, wsNeo, neoLastRow, neoLastColumn)
-                Set wsNeoInput = Nothing
-                Set wsRepInput = Nothing
-                Call ReleaseInputWorkbookSafe(wbNeo, neoOpenedByTool, cleanupFailed)
-                Call ReleaseInputWorkbookSafe(wbRepartition, repartitionOpenedByTool, cleanupFailed)
-                If cleanupFailed Then
-                    Err.Raise TOOL_ERROR + 94, METHOD_NAME, "Could not release a tool-opened input."
-                End If
-                wsNeo.Columns("A:G").Insert Shift:=xlToRight
-                wsNeo.Columns("A:G").NumberFormat = "@"
-                wsNeo.Cells(1, 1).Resize(UBound(enriched, 1), UBound(enriched, 2)).Value2 = enriched
-                Call FormatHeader(wsNeo.Cells(1, 1).Resize(1, UBound(enriched, 2)))
-                Call ApplyDataFormatting(wsNeo, 1, UBound(enriched, 1), UBound(enriched, 2), False)
-                Call FitDataColumns(wsNeo, 1, UBound(enriched, 1), UBound(enriched, 2), False)
-                Call BuildDashboard(wbMaster, enriched, allocationDate, runStamp)
-                Set counts = AccountantCounts(wsNeo)
-                If counts.Exists(UNASSIGNED_NAME) Then unassignedCount = CLng(counts(UNASSIGNED_NAME))
-                ' Save workbooks with the user's calculation mode, not the temporary manual mode.
-                Application.Calculation = state.Calculation
-                wbMaster.Save
-                Call SaveTimestampedMaster(wbMaster, stagingFolder, runStamp)
-                Call GenerateAccountantFiles(wbMaster, stagingFolder, runStamp, allocationDate, counts)
-                finalFolder = FinalizeRunFolder(stagingFolder)
-                stagingFolder = vbNullString
-                completed = True
+            masterPath = UniqueOutputPath(stagingFolder, "NeoAdvices_MASTER_" & runStamp)
+            wbLauncher.SaveCopyAs masterPath
+            Set wbMaster = Application.Workbooks.Open(Filename:=masterPath, UpdateLinks:=0, _
+                ReadOnly:=False, IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
+            If wbMaster.ReadOnly Then
+                Err.Raise TOOL_ERROR + 141, METHOD_NAME, "Output Master opened read-only."
             End If
+            wbMaster.Worksheets(SHEET_RUN).Name = SHEET_DASHBOARD
+            wbMaster.Names(LAUNCHER_MARKER).Delete
+            wbMaster.Names.Add Name:=RESULT_MARKER, RefersTo:="=TRUE", Visible:=False
+            Application.StatusBar = "NeoAdvices: building separate output Master..."
+            Set wsNeo = RequiredSheet(wbMaster, SHEET_NEO)
+            Set wsRep = RequiredSheet(wbMaster, SHEET_REPARTITION)
+            Set wsDashboard = RequiredSheet(wbMaster, SHEET_DASHBOARD)
+            Call RemoveAllSlicerCaches(wbMaster)
+            Call ClearWorksheetView(wsDashboard)
+            Call ClearWorksheetView(wsNeo)
+            Call ClearWorksheetView(wsRep)
+            wsDashboard.Visible = xlSheetVisible
+            wsNeo.Visible = xlSheetVisible
+            wsRep.Visible = xlSheetVisible
+            Call CopyInputSnapshot(wsRepInput, wsRep, repLastRow, repLastColumn)
+            Call CopyInputSnapshot(wsNeoInput, wsNeo, neoLastRow, neoLastColumn)
+            Set wsNeoInput = Nothing
+            Set wsRepInput = Nothing
+            Call ReleaseInputWorkbookSafe(wbNeo, neoOpenedByTool, cleanupFailed)
+            Call ReleaseInputWorkbookSafe(wbRepartition, repartitionOpenedByTool, cleanupFailed)
+            If cleanupFailed Then
+                Err.Raise TOOL_ERROR + 94, METHOD_NAME, "Could not release a tool-opened input."
+            End If
+            wsNeo.Columns("A:G").Insert Shift:=xlToRight
+            wsNeo.Columns("A:G").NumberFormat = "@"
+            wsNeo.Cells(1, 1).Resize(UBound(enriched, 1), UBound(enriched, 2)).Value2 = enriched
+            Call FormatHeader(wsNeo.Cells(1, 1).Resize(1, UBound(enriched, 2)))
+            Call ApplyDataFormatting(wsNeo, 1, UBound(enriched, 1), UBound(enriched, 2), False)
+            Call FitDataColumns(wsNeo, 1, UBound(enriched, 1), UBound(enriched, 2), False)
+            Call BuildDashboard(wbMaster, enriched, allocationDate, runStamp)
+            Set counts = AccountantCounts(wsNeo)
+            If counts.Exists(UNASSIGNED_NAME) Then unassignedCount = CLng(counts(UNASSIGNED_NAME))
+            ' Save workbooks with the user's calculation mode, not the temporary manual mode.
+            Application.Calculation = state.Calculation
+            wbMaster.Save
+            Call GenerateAccountantFiles(wbMaster, stagingFolder, runStamp, allocationDate, counts)
+            Set wsNeo = Nothing
+            Set wsRep = Nothing
+            Set wsDashboard = Nothing
+            wbMaster.Close SaveChanges:=False
+            Set wbMaster = Nothing
+            finalFolder = FinalizeRunFolder(stagingFolder)
+            stagingFolder = vbNullString
+            completed = True
         End If
     End If
 
@@ -248,6 +264,10 @@ ExitPoint:
     Set wsRepInput = Nothing
     Call ReleaseInputWorkbookSafe(wbNeo, neoOpenedByTool, cleanupFailed)
     Call ReleaseInputWorkbookSafe(wbRepartition, repartitionOpenedByTool, cleanupFailed)
+    Set wsNeo = Nothing
+    Set wsRep = Nothing
+    Set wsDashboard = Nothing
+    Call CloseWorkbookSafe(wbMaster, cleanupFailed)
     Call RestoreExcelStateSafe(state, cleanupFailed)
     If cleanupFailed And errNumber = 0 Then
         errNumber = TOOL_ERROR + 84
@@ -255,7 +275,7 @@ ExitPoint:
     End If
     If errNumber <> 0 And Len(stagingFolder) > 0 Then
         Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, _
-            "An IN_PROGRESS output folder remains. The BEFORE_RUN snapshot preserves the previous Master.")
+            "An IN_PROGRESS folder remains. The launcher contains no imported results.")
     End If
     If completed And errNumber = 0 Then
         MsgBox "Gotowe." & vbCrLf & "Instrukcje: " & CStr(neoLastRow - 1) & vbCrLf & _
@@ -272,6 +292,7 @@ ExitPoint:
     Set wsRep = Nothing
     Set wsDashboard = Nothing
     Set wbMaster = Nothing
+    Set wbLauncher = Nothing
     If errNumber <> 0 Then
         Call DisplayErrors
     End If
