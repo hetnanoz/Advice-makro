@@ -8,7 +8,7 @@ Private pLastSelection As Range
 ' Creation date: 2026-10-14
 ' Parameters:    See typed signature.
 ' Returns:       See typed signature.
-' Description:   Worksheet_SelectionChange - UPDATE06.
+' Description:   Worksheet_SelectionChange - UPDATE09.
 '-------------------------------------------------------------------------------
 Private Sub Worksheet_SelectionChange(ByVal Target As Range)
     Const METHOD_NAME As String = "Worksheet_SelectionChange"
@@ -35,7 +35,7 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See typed signature.
 ' Returns:       See typed signature.
-' Description:   Worksheet_Deactivate - UPDATE06.
+' Description:   Worksheet_Deactivate - UPDATE09.
 '-------------------------------------------------------------------------------
 Private Sub Worksheet_Deactivate()
     Const METHOD_NAME As String = "Worksheet_Deactivate"
@@ -62,7 +62,7 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See typed signature.
 ' Returns:       See typed signature.
-' Description:   Worksheet_BeforeDoubleClick - UPDATE06.
+' Description:   Worksheet_BeforeDoubleClick - UPDATE09.
 '-------------------------------------------------------------------------------
 Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean)
     Const METHOD_NAME As String = "Worksheet_BeforeDoubleClick"
@@ -115,7 +115,7 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See typed signature.
 ' Returns:       See typed signature.
-' Description:   Worksheet_BeforeRightClick - UPDATE06.
+' Description:   Worksheet_BeforeRightClick - UPDATE09.
 '-------------------------------------------------------------------------------
 Private Sub Worksheet_BeforeRightClick(ByVal Target As Range, Cancel As Boolean)
     Const METHOD_NAME As String = "Worksheet_BeforeRightClick"
@@ -156,6 +156,63 @@ ExitPoint:
     Set hit = Nothing
     Set candidate = Nothing
     Set lo = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   Worksheet_Change - UPDATE09.
+'-------------------------------------------------------------------------------
+Private Sub Worksheet_Change(ByVal Target As Range)
+    Const METHOD_NAME As String = "Worksheet_Change"
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call ResetErrors
+    Call UpdateProgressCounters(Me)
+
+ExitPoint:
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-14
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   Worksheet_Activate - UPDATE09.
+'-------------------------------------------------------------------------------
+Private Sub Worksheet_Activate()
+    Const METHOD_NAME As String = "Worksheet_Activate"
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set pLastSelection = Nothing
+    Call ResetErrors
+    Call UpdateProgressCounters(Me)
+
+ExitPoint:
     If errNumber <> 0 Then Call DisplayErrors
     Exit Sub
 
