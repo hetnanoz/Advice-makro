@@ -100,6 +100,7 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
     Call ApplyDataFormatting(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
     Call FitDataColumns(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
     Call ApplyDashboardColumnWidths(ws, enriched)
+    Call CaptureLayoutDefault(wb)
     ws.Rows("1:8").RowHeight = 24
     ws.Rows("9:10").RowHeight = 24
     Call CreateDashboardControls(wb, False)
@@ -141,7 +142,7 @@ Public Sub WriteDashboardCaption(ByVal ws As Worksheet, ByVal allocationDate As 
     With ws.Cells(10, 1)
         .Value2 = "NeoAdvices " & TOOL_VERSION & " | " & viewName & " | Allocation: " & _
             Format$(allocationDate, "dd/mm/yyyy") & " | Run: " & runStamp & " | " & BatModeCaption() & _
-            " | Layout UPDATE15 | Done / Doubt: double-click a box"
+            " | Layout UPDATE16 | Done / Doubt: double-click a box"
         .Font.Name = "Calibri"
         .Font.Size = 10
         .Font.Bold = True
@@ -242,6 +243,7 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
         leftPosition = leftPosition + buttonWidth + 6
     Next buttonIndex
     stepDescription = "Build progress counters"
+    Call AddColumnSettingsButton(wb)
     Call BuildProgressCounters(ws)
     Call FreezeDashboardStatusColumns(ws)
 
@@ -280,6 +282,8 @@ Public Sub RebindDashboardButtons(ByVal wb As Workbook, ByVal savedFileName As S
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
+    ws.Shapes("btnNeo_ColumnSettings").OnAction = _
+        "'" & Replace(savedFileName, "'", "''") & "'!OpenNeoColumnSettings"
     names = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", "FilterSecCashSecurity")
     For itemIndex = LBound(names) To UBound(names)
         ws.Shapes("btnNeo_" & CStr(itemIndex + 1)).OnAction = _
