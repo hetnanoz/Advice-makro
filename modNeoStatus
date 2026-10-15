@@ -63,6 +63,7 @@ Public Sub ApplyNeoStatus(ByVal ws As Worksheet, ByVal target As Range, ByVal mo
             lo.DataBodyRange.Rows(CLng(key)).Cells(1, 1).Resize(1, 2).Value2 = marks
         Next key
         ' Existing conditional formats preserve CANC backgrounds and movement font colors.
+        Call UpdateProgressCounters(ws)
         ws.Calculate
     End If
 
