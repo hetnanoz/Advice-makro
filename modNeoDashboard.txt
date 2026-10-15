@@ -52,6 +52,8 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
     Dim columnCount As Long
     Dim rowIndex As Long
     Dim columnIndex As Long
+    Dim sourceIndex As Long
+    Dim columnOrder As Variant
     Dim lo As ListObject
     Dim tableRange As Range
     Dim errNumber As Long
@@ -62,12 +64,14 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
     Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
     rowCount = UBound(enriched, 1)
     columnCount = UBound(enriched, 2) + 2
+    columnOrder = DefaultDashboardColumnOrder(columnCount)
     ReDim result(1 To rowCount, 1 To columnCount)
     result(1, 1) = "Done"
     result(1, 2) = "Doubt"
     For rowIndex = 1 To rowCount
-        For columnIndex = 1 To UBound(enriched, 2)
-            result(rowIndex, columnIndex + 2) = enriched(rowIndex, columnIndex)
+        For columnIndex = 3 To columnCount
+            sourceIndex = CLng(columnOrder(columnIndex)) - 2
+            result(rowIndex, columnIndex) = enriched(rowIndex, sourceIndex)
         Next columnIndex
     Next rowIndex
     Set tableRange = ws.Cells(DASH_HEADER_ROW, 1).Resize(rowCount, UBound(result, 2))
@@ -80,8 +84,12 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
     lo.ShowTableStyleRowStripes = False
     lo.ShowTableStyleColumnStripes = False
     lo.ShowTotals = False
-    wb.Worksheets(SHEET_NEO).Cells(1, 1).Resize(rowCount, UBound(enriched, 2)).Copy
-    ws.Cells(DASH_HEADER_ROW, 3).PasteSpecial Paste:=xlPasteFormats
+    ' Copy source formats using the same mapping as values; identifiers stay text.
+    For columnIndex = 3 To columnCount
+        sourceIndex = CLng(columnOrder(columnIndex)) - 2
+        wb.Worksheets(SHEET_NEO).Cells(1, sourceIndex).Resize(rowCount, 1).Copy
+        ws.Cells(DASH_HEADER_ROW, columnIndex).PasteSpecial Paste:=xlPasteFormats
+    Next columnIndex
     Application.CutCopyMode = False
     Call SortDashboardRows(lo)
     Call FormatHeader(lo.HeaderRowRange)
@@ -890,3 +898,57 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    columnCount: width of the original Dashboard layout including Done/Doubt.
+' Returns:       One-based mapping of destination columns to original Dashboard columns.
+' Description:   UPDATE13: preferred columns first; all remaining columns retain source order.
+'-------------------------------------------------------------------------------
+Private Function DefaultDashboardColumnOrder(ByVal columnCount As Long) As Variant
+    Const METHOD_NAME As String = "DefaultDashboardColumnOrder"
+    Dim preferred As Variant
+    Dim ordered() As Long
+    Dim used() As Boolean
+    Dim itemIndex As Long
+    Dim sourceIndex As Long
+    Dim destinationIndex As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    ' Original layout: A, B, J, K, L, O, P, Q, U, V, W, X, Y, Z, AA.
+    preferred = Array(1, 2, 10, 11, 12, 15, 16, 17, 21, 22, 23, 24, 25, 26, 27)
+    If columnCount < 27 Then
+        Err.Raise TOOL_ERROR + 126, METHOD_NAME, "Dashboard requires at least 27 source columns."
+    End If
+    ReDim ordered(1 To columnCount)
+    ReDim used(1 To columnCount)
+    For itemIndex = LBound(preferred) To UBound(preferred)
+        sourceIndex = CLng(preferred(itemIndex))
+        destinationIndex = destinationIndex + 1
+        ordered(destinationIndex) = sourceIndex
+        used(sourceIndex) = True
+    Next itemIndex
+    For sourceIndex = 1 To columnCount
+        If Not used(sourceIndex) Then
+            destinationIndex = destinationIndex + 1
+            ordered(destinationIndex) = sourceIndex
+        End If
+    Next sourceIndex
+    DefaultDashboardColumnOrder = ordered
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
