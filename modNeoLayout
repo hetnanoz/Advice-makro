@@ -1,0 +1,959 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoLayout"
+Private Const SETTINGS_SHEET As String = "Column settings"
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: SetLayoutValue.
+'-------------------------------------------------------------------------------
+Public Sub SetLayoutValue(ByVal wb As Workbook, ByVal key As String, ByVal value As String)
+    Const METHOD_NAME As String = "SetLayoutValue"
+
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    wb.Names.Add Name:="_NeoLayout_" & key, _
+        RefersTo:="=""" & Replace(value, """", """""") & """", Visible:=False
+
+ExitPoint:
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: LayoutValue.
+'-------------------------------------------------------------------------------
+Private Function LayoutValue(ByVal wb As Workbook, ByVal key As String) As String
+    Const METHOD_NAME As String = "LayoutValue"
+    Dim entry As Name
+    Dim shortName As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For Each entry In wb.Names
+        shortName = entry.Name
+        If InStrRev(shortName, "!") > 0 Then shortName = Mid$(shortName, InStrRev(shortName, "!") + 1)
+        If StrComp(shortName, "_NeoLayout_" & key, vbTextCompare) = 0 Then
+            LayoutValue = Replace(Mid$(entry.RefersTo, 3, Len(entry.RefersTo) - 3), """""", """")
+            Exit For
+        End If
+    Next entry
+
+ExitPoint:
+    Set entry = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: CaptureLayoutDefault.
+'-------------------------------------------------------------------------------
+Public Sub CaptureLayoutDefault(ByVal wb As Workbook)
+    Const METHOD_NAME As String = "CaptureLayoutDefault"
+    Dim lo As ListObject
+    Dim i As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set lo = wb.Worksheets(SHEET_DASHBOARD).ListObjects(TABLE_DASHBOARD)
+    Call SetLayoutValue(wb, "Count", CStr(lo.ListColumns.Count))
+    Call SetLayoutValue(wb, "Owner", "__MASTER__")
+    For i = 1 To lo.ListColumns.Count
+        Call SetLayoutValue(wb, "Header" & CStr(i), lo.ListColumns(i).Name)
+        Call SetLayoutValue(wb, "Width" & CStr(i), Trim$(Str$(lo.ListColumns(i).Range.ColumnWidth)))
+    Next i
+
+ExitPoint:
+    Set lo = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: AddColumnSettingsButton.
+'-------------------------------------------------------------------------------
+Public Sub AddColumnSettingsButton(ByVal wb As Workbook)
+    Const METHOD_NAME As String = "AddColumnSettingsButton"
+    Dim ws As Worksheet
+    Dim button As Shape
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set ws = wb.Worksheets(SHEET_DASHBOARD)
+    Set button = ws.Shapes.AddShape(msoShapeRoundedRectangle, ws.Columns(3).Left + 730, _
+        ws.Rows(9).Top + 1, 150, 22)
+    button.Name = "btnNeo_ColumnSettings"
+    button.TextFrame.Characters.Text = "Column settings"
+    button.TextFrame.Characters.Font.Color = RGB(255, 255, 255)
+    button.Fill.ForeColor.RGB = RGB(31, 78, 121)
+    button.Line.Visible = msoFalse
+    button.Placement = xlFreeFloating
+    button.OnAction = "'" & Replace(wb.Name, "'", "''") & "'!OpenNeoColumnSettings"
+
+ExitPoint:
+    Set button = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: OpenNeoColumnSettings.
+'-------------------------------------------------------------------------------
+Private Sub BuildSettingsEditor(ByVal wbMaster As Workbook)
+    Const METHOD_NAME As String = "BuildSettingsEditor"
+    Dim ws As Worksheet
+    Dim item As Worksheet
+    Dim lo As ListObject
+    Dim i As Long
+    Dim button As Shape
+    Dim captions As Variant
+    Dim macros As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If wbMaster Is Nothing Then Err.Raise TOOL_ERROR + 150, METHOD_NAME, "No active workbook."
+    If wbMaster.ReadOnly Or wbMaster.ProtectStructure Then
+        Err.Raise TOOL_ERROR + 156, METHOD_NAME, "Workbook is read-only or its structure is protected."
+    End If
+    Set lo = wbMaster.Worksheets(SHEET_DASHBOARD).ListObjects(TABLE_DASHBOARD)
+    If Len(LayoutValue(wbMaster, "Count")) = 0 Then
+        Err.Raise TOOL_ERROR + 151, METHOD_NAME, "Regenerate this file using UPDATE16 first."
+    End If
+    For Each item In wbMaster.Worksheets
+        If item.Name = SETTINGS_SHEET Then Set ws = item
+    Next item
+    If ws Is Nothing Then
+        Set ws = wbMaster.Worksheets.Add(After:=wbMaster.Worksheets(wbMaster.Worksheets.Count))
+        ws.Name = SETTINGS_SHEET
+    End If
+    ws.Cells.Clear
+    ws.Columns(2).NumberFormat = "@"
+    For i = ws.Shapes.Count To 1 Step -1
+        ws.Shapes(i).Delete
+    Next i
+    ws.Range("A1").Value2 = "COLUMN SETTINGS | " & LayoutValue(wbMaster, "Owner")
+    ws.Range("A2").Value2 = "Edit Order (unique numbers 3..N) and Width, then click Apply."
+    ws.Range("A3").Value2 = "Done/Doubt stay first. Apply clears filters; data and status marks are retained."
+    ws.Range("A4").Value2 = "Defaults folder: " & LayoutValue(wbMaster, "Folder")
+    ws.Range("A5").Value2 = "Save defaults affects future files. Save the workbook separately."
+    ws.Range("A7").Value2 = "Order"
+    ws.Range("B7").Value2 = "Column name (do not edit)"
+    ws.Range("C7").Value2 = "Width"
+    For i = 1 To lo.ListColumns.Count
+        ws.Cells(i + 7, 1).Value2 = i
+        ws.Cells(i + 7, 2).Value2 = lo.ListColumns(i).Name
+        ws.Cells(i + 7, 3).Value2 = lo.ListColumns(i).Range.ColumnWidth
+    Next i
+    ws.Columns(1).ColumnWidth = 12
+    ws.Columns(2).ColumnWidth = 45
+    ws.Columns(3).ColumnWidth = 12
+    ws.Range("A1").Font.Bold = True
+    Call FormatHeader(ws.Range("A7:C7"))
+    captions = Array("Apply", "Save as my default", "Reset to default")
+    macros = Array("ApplyNeoColumnSettings", "SaveNeoColumnSettings", "ResetNeoColumnSettings")
+    For i = 0 To 2
+        Set button = ws.Shapes.AddShape(msoShapeRoundedRectangle, 510, 120 + i * 36, 180, 28)
+        button.TextFrame.Characters.Text = CStr(captions(i))
+        button.Fill.ForeColor.RGB = RGB(31, 78, 121)
+        button.TextFrame.Characters.Font.Color = RGB(255, 255, 255)
+        button.OnAction = "'" & Replace(wbMaster.Name, "'", "''") & "'!" & CStr(macros(i))
+    Next i
+
+ExitPoint:
+    Set button = Nothing
+    Set lo = Nothing
+    Set item = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: ReadEditorLayout.
+'-------------------------------------------------------------------------------
+Private Function ReadEditorLayout(ByVal wb As Workbook) As Variant
+    Const METHOD_NAME As String = "ReadEditorLayout"
+    Dim ws As Worksheet
+    Dim lo As ListObject
+    Dim result() As Variant
+    Dim seen As Object
+    Dim i As Long
+    Dim rank As Long
+    Dim value As Variant
+    Dim width As Double
+    Dim header As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set ws = wb.Worksheets(SETTINGS_SHEET)
+    Set lo = wb.Worksheets(SHEET_DASHBOARD).ListObjects(TABLE_DASHBOARD)
+    Set seen = CreateObject("Scripting.Dictionary")
+    ReDim result(1 To lo.ListColumns.Count, 1 To 2)
+    For i = 1 To lo.ListColumns.Count
+        value = ws.Cells(i + 7, 1).Value2
+        If IsError(value) Then Err.Raise TOOL_ERROR + 152, METHOD_NAME, "Invalid order."
+        If Not IsNumeric(value) Then Err.Raise TOOL_ERROR + 152, METHOD_NAME, "Order must be numeric."
+        If CDbl(value) <> Fix(CDbl(value)) Or CDbl(value) < 1 Or CDbl(value) > lo.ListColumns.Count Then
+            Err.Raise TOOL_ERROR + 152, METHOD_NAME, "Order must contain unique integers 1..N."
+        End If
+        rank = CLng(value)
+        If seen.Exists(rank) Then Err.Raise TOOL_ERROR + 152, METHOD_NAME, "Duplicate order number."
+        seen.Add rank, True
+        header = CleanText(ws.Cells(i + 7, 2).Value2)
+        If header <> lo.ListColumns(i).Name Then
+            Err.Raise TOOL_ERROR + 153, METHOD_NAME, "Column names or editor rows changed. Reopen settings."
+        End If
+        If i <= 2 And rank <> i Then Err.Raise TOOL_ERROR + 154, METHOD_NAME, "Done/Doubt cannot move."
+        value = ws.Cells(i + 7, 3).Value2
+        If IsError(value) Then Err.Raise TOOL_ERROR + 155, METHOD_NAME, "Invalid width."
+        If Not IsNumeric(value) Then Err.Raise TOOL_ERROR + 155, METHOD_NAME, "Width must be numeric."
+        width = CDbl(value)
+        If width < 3 Or width > 80 Then Err.Raise TOOL_ERROR + 155, METHOD_NAME, "Width range: 3 to 80."
+        result(rank, 1) = header
+        result(rank, 2) = width
+    Next i
+    ReadEditorLayout = result
+
+ExitPoint:
+    Set seen = Nothing
+    Set lo = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: WriteLayoutTable.
+'-------------------------------------------------------------------------------
+Private Sub WriteLayoutTable(ByVal ws As Worksheet, ByRef values As Variant, _
+                             ByRef widths As Variant, ByRef formats As Variant)
+    Const METHOD_NAME As String = "WriteLayoutTable"
+    Dim lo As ListObject
+    Dim target As Range
+    Dim i As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For Each lo In ws.ListObjects
+        If lo.Name = TABLE_DASHBOARD Then
+            lo.Unlist
+            Exit For
+        End If
+    Next lo
+    Set target = ws.Cells(DASH_HEADER_ROW, 1).Resize(UBound(values, 1), UBound(values, 2))
+    target.Clear
+    target.NumberFormat = "@"
+    target.Value2 = values
+    Set lo = ws.ListObjects.Add(SourceType:=xlSrcRange, Source:=target, XlListObjectHasHeaders:=xlYes)
+    lo.Name = TABLE_DASHBOARD
+    lo.TableStyle = vbNullString
+    lo.ShowTableStyleRowStripes = False
+    lo.ShowTableStyleColumnStripes = False
+    For i = 1 To UBound(values, 2)
+        lo.ListColumns(i).Range.NumberFormat = CStr(formats(i))
+        ws.Columns(i).ColumnWidth = CDbl(widths(i))
+    Next i
+    Call FormatHeader(lo.HeaderRowRange)
+    Call ApplyDataFormatting(ws, DASH_HEADER_ROW, _
+        DASH_HEADER_ROW + UBound(values, 1) - 1, UBound(values, 2), True)
+
+ExitPoint:
+    Set target = Nothing
+    Set lo = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: RestoreLayoutSafe.
+'-------------------------------------------------------------------------------
+Private Sub RestoreLayoutSafe(ByVal ws As Worksheet, ByRef values As Variant, _
+                              ByRef widths As Variant, ByRef formats As Variant)
+    Const METHOD_NAME As String = "RestoreLayoutSafe"
+
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call WriteLayoutTable(ws, values, widths, formats)
+
+ExitPoint:
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: ApplyLayout.
+'-------------------------------------------------------------------------------
+Private Sub ApplyLayout(ByVal wb As Workbook, ByRef layout As Variant)
+    Const METHOD_NAME As String = "ApplyLayout"
+    Dim ws As Worksheet
+    Dim lo As ListObject
+    Dim source As Variant
+    Dim result() As Variant
+    Dim oldWidths() As Variant
+    Dim oldFormats() As Variant
+    Dim widths() As Variant
+    Dim formats() As Variant
+    Dim map As Object
+    Dim i As Long
+    Dim r As Long
+    Dim sourceIndex As Long
+    Dim state As TExcelState
+    Dim cleanupFailed As Boolean
+    Dim mutated As Boolean
+    Dim recoveryNumber As Long
+    Dim recoveryDescription As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set ws = wb.Worksheets(SHEET_DASHBOARD)
+    Set lo = ws.ListObjects(TABLE_DASHBOARD)
+    If ws.ProtectContents Or wb.ReadOnly Then
+        Err.Raise TOOL_ERROR + 156, METHOD_NAME, "Dashboard is protected or read-only."
+    End If
+    If UBound(layout, 1) <> lo.ListColumns.Count Then
+        Err.Raise TOOL_ERROR + 157, METHOD_NAME, "Layout does not match current columns."
+    End If
+    If layout(1, 1) <> "Done" Or layout(2, 1) <> "Doubt" Then
+        Err.Raise TOOL_ERROR + 154, METHOD_NAME, "Done/Doubt must stay first."
+    End If
+    source = lo.Range.Value2
+    ReDim result(1 To UBound(source, 1), 1 To UBound(source, 2))
+    ReDim widths(1 To lo.ListColumns.Count)
+    ReDim formats(1 To lo.ListColumns.Count)
+    ReDim oldWidths(1 To lo.ListColumns.Count)
+    ReDim oldFormats(1 To lo.ListColumns.Count)
+    Set map = CreateObject("Scripting.Dictionary")
+    For i = 1 To lo.ListColumns.Count
+        map.Add lo.ListColumns(i).Name, i
+        oldWidths(i) = lo.ListColumns(i).Range.ColumnWidth
+        oldFormats(i) = lo.ListColumns(i).Range.Cells(lo.ListColumns(i).Range.Rows.Count, 1).NumberFormat
+    Next i
+    For i = 1 To UBound(layout, 1)
+        If Not map.Exists(CStr(layout(i, 1))) Then
+            Err.Raise TOOL_ERROR + 157, METHOD_NAME, "Unknown or duplicate layout column."
+        End If
+        sourceIndex = CLng(map(CStr(layout(i, 1))))
+        map.Remove CStr(layout(i, 1))
+        widths(i) = CDbl(layout(i, 2))
+        If widths(i) < 3 Or widths(i) > 80 Then
+            Err.Raise TOOL_ERROR + 155, METHOD_NAME, "Width range: 3 to 80."
+        End If
+        formats(i) = oldFormats(sourceIndex)
+        For r = 1 To UBound(source, 1)
+            result(r, i) = source(r, sourceIndex)
+        Next r
+    Next i
+    Call CaptureExcelState(state)
+    Application.EnableEvents = False
+    Application.ScreenUpdating = False
+    Call RemoveAllSlicerCaches(wb)
+    If lo.AutoFilter.FilterMode Then lo.AutoFilter.ShowAllData
+    mutated = True
+    Call WriteLayoutTable(ws, result, widths, formats)
+    mutated = False
+
+ExitPoint:
+    If mutated And errNumber <> 0 Then
+        On Error Resume Next
+        VBA.Err.Clear
+        Call RestoreLayoutSafe(ws, source, oldWidths, oldFormats)
+        recoveryNumber = VBA.Err.Number
+        recoveryDescription = VBA.Err.Description
+        VBA.Err.Clear
+        On Error GoTo 0
+        If recoveryNumber <> 0 Then
+            Call RecordError(CLASS_NAME, "RestoreLayoutSafe", recoveryNumber, recoveryDescription)
+        End If
+    End If
+    Call RestoreExcelStateSafe(state, cleanupFailed)
+    If cleanupFailed And errNumber = 0 Then
+        errNumber = TOOL_ERROR + 158
+        errDescription = "Could not restore Excel state after layout change."
+    End If
+    Set map = Nothing
+    Set lo = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: ApplyNeoColumnSettings.
+'-------------------------------------------------------------------------------
+Public Sub ApplyNeoColumnSettings()
+    Const METHOD_NAME As String = "ApplyNeoColumnSettings"
+    Dim wbMaster As Workbook
+    Dim layout As Variant
+    Dim count As Long
+    Dim i As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wbMaster = Application.ActiveWorkbook
+    Call ResetErrors
+    If wbMaster Is Nothing Then Err.Raise TOOL_ERROR + 150, METHOD_NAME, "No active workbook."
+    layout = ReadEditorLayout(wbMaster)
+    Call ApplyLayout(wbMaster, layout)
+    Call CreateDashboardControls(wbMaster, HasCopyMarker(wbMaster))
+    Call BuildSettingsEditor(wbMaster)
+    MsgBox "Layout applied. Open the Dashboard tab to see the result.", vbInformation, "NeoAdvices"
+
+
+ExitPoint:
+    Set wbMaster = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: SaveNeoColumnSettings.
+'-------------------------------------------------------------------------------
+Public Sub SaveNeoColumnSettings()
+    Const METHOD_NAME As String = "SaveNeoColumnSettings"
+    Dim wbMaster As Workbook
+    Dim layout As Variant
+    Dim count As Long
+    Dim i As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wbMaster = Application.ActiveWorkbook
+    Call ResetErrors
+    If wbMaster Is Nothing Then Err.Raise TOOL_ERROR + 150, METHOD_NAME, "No active workbook."
+    If LayoutValue(wbMaster, "Owner") = "__MASTER__" Then
+        Err.Raise TOOL_ERROR + 163, METHOD_NAME, "Save personal defaults from an Accountant output file."
+    End If
+    layout = ReadEditorLayout(wbMaster)
+    Call ApplyLayout(wbMaster, layout)
+    Call CreateDashboardControls(wbMaster, HasCopyMarker(wbMaster))
+    Call SaveLayoutFile(wbMaster, layout)
+    Call BuildSettingsEditor(wbMaster)
+    MsgBox "Layout applied. Open the Dashboard tab to see the result.", vbInformation, "NeoAdvices"
+
+
+ExitPoint:
+    Set wbMaster = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: ResetNeoColumnSettings.
+'-------------------------------------------------------------------------------
+Public Sub ResetNeoColumnSettings()
+    Const METHOD_NAME As String = "ResetNeoColumnSettings"
+    Dim wbMaster As Workbook
+    Dim layout As Variant
+    Dim count As Long
+    Dim i As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wbMaster = Application.ActiveWorkbook
+    Call ResetErrors
+    If wbMaster Is Nothing Then Err.Raise TOOL_ERROR + 150, METHOD_NAME, "No active workbook."
+    count = CLng(LayoutValue(wbMaster, "Count"))
+    ReDim layout(1 To count, 1 To 2)
+    For i = 1 To count
+        layout(i, 1) = LayoutValue(wbMaster, "Header" & CStr(i))
+        layout(i, 2) = Val(LayoutValue(wbMaster, "Width" & CStr(i)))
+    Next i
+    Call ApplyLayout(wbMaster, layout)
+    Call CreateDashboardControls(wbMaster, HasCopyMarker(wbMaster))
+    Call BuildSettingsEditor(wbMaster)
+    MsgBox "Layout applied. Open the Dashboard tab to see the result.", vbInformation, "NeoAdvices"
+
+
+ExitPoint:
+    Set wbMaster = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: LayoutFilePath.
+'-------------------------------------------------------------------------------
+Private Function LayoutFilePath(ByVal wb As Workbook) As String
+    Const METHOD_NAME As String = "LayoutFilePath"
+    Dim fso As Object
+    Dim folder As String
+    Dim owner As String
+    Dim encoded As String
+    Dim i As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    folder = LayoutValue(wb, "Folder")
+    owner = LayoutValue(wb, "Owner")
+    If Len(folder) = 0 Or Len(owner) = 0 Then
+        Err.Raise TOOL_ERROR + 159, METHOD_NAME, "Defaults folder or Accountant identity is missing."
+    End If
+    For i = 1 To Len(owner)
+        encoded = encoded & Right$("0000" & Hex$(AscW(Mid$(LCase$(owner), i, 1)) And &HFFFF&), 4)
+    Next i
+    LayoutFilePath = fso.BuildPath(folder, encoded & ".xml")
+    If Len(LayoutFilePath) > 240 Then
+        Err.Raise TOOL_ERROR + 160, METHOD_NAME, "Defaults path is too long; shorten the launcher path."
+    End If
+
+ExitPoint:
+    Set fso = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: SaveLayoutFile.
+'-------------------------------------------------------------------------------
+Private Sub SaveLayoutFile(ByVal wb As Workbook, ByRef layout As Variant)
+    Const METHOD_NAME As String = "SaveLayoutFile"
+    Dim xml As Object
+    Dim node As Object
+    Dim rootNode As Object
+    Dim fso As Object
+    Dim filePath As String
+    Dim tempPath As String
+    Dim folder As String
+    Dim i As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    filePath = LayoutFilePath(wb)
+    folder = fso.GetParentFolderName(filePath)
+    If Not fso.FolderExists(folder) Then fso.CreateFolder folder
+    Set xml = CreateObject("MSXML2.DOMDocument.6.0")
+    Set rootNode = xml.createElement("layout")
+    rootNode.setAttribute "owner", LayoutValue(wb, "Owner")
+    xml.appendChild rootNode
+    For i = 1 To UBound(layout, 1)
+        Set node = xml.createElement("column")
+        node.setAttribute "name", CStr(layout(i, 1))
+        node.setAttribute "width", Trim$(Str$(CDbl(layout(i, 2))))
+        rootNode.appendChild node
+    Next i
+    tempPath = fso.BuildPath(folder, fso.GetTempName)
+    xml.Save tempPath
+    If fso.FileExists(filePath) Then fso.CopyFile filePath, filePath & ".bak", True
+    fso.CopyFile tempPath, filePath, True
+    fso.DeleteFile tempPath, False
+    MsgBox "Default layout saved for " & LayoutValue(wb, "Owner") & ".", vbInformation, "NeoAdvices"
+
+ExitPoint:
+    Set node = Nothing
+    Set rootNode = Nothing
+    Set xml = Nothing
+    Set fso = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE16: LoadAccountantLayout.
+'-------------------------------------------------------------------------------
+Public Sub LoadAccountantLayout(ByVal wb As Workbook, ByVal accountantName As String)
+    Const METHOD_NAME As String = "LoadAccountantLayout"
+    Dim fso As Object
+    Dim xml As Object
+    Dim nodes As Object
+    Dim node As Object
+    Dim lo As ListObject
+    Dim saved As Object
+    Dim layout() As Variant
+    Dim filePath As String
+    Dim header As String
+    Dim i As Long
+    Dim position As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Call SetLayoutValue(wb, "Owner", accountantName)
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    filePath = LayoutFilePath(wb)
+    If fso.FileExists(filePath) Then
+        Set xml = CreateObject("MSXML2.DOMDocument.6.0")
+        xml.async = False
+        xml.resolveExternals = False
+        xml.setProperty "ProhibitDTD", True
+        If Not xml.Load(filePath) Then Err.Raise TOOL_ERROR + 161, METHOD_NAME, "Invalid layout XML."
+        If StrComp(CStr(xml.documentElement.getAttribute("owner")), accountantName, vbTextCompare) <> 0 Then
+            Err.Raise TOOL_ERROR + 162, METHOD_NAME, "Layout Accountant does not match output owner."
+        End If
+        Set lo = wb.Worksheets(SHEET_DASHBOARD).ListObjects(TABLE_DASHBOARD)
+        Set saved = CreateObject("Scripting.Dictionary")
+        For i = 1 To lo.ListColumns.Count
+            saved.Add lo.ListColumns(i).Name, lo.ListColumns(i).Range.ColumnWidth
+        Next i
+        ReDim layout(1 To lo.ListColumns.Count, 1 To 2)
+        Set nodes = xml.selectNodes("/layout/column")
+        For Each node In nodes
+            header = CStr(node.getAttribute("name"))
+            If saved.Exists(header) Then
+                position = position + 1
+                layout(position, 1) = header
+                layout(position, 2) = Val(CStr(node.getAttribute("width")))
+                saved.Remove header
+            End If
+        Next node
+        ' Append new fields in current default order; obsolete saved fields are ignored.
+        For i = 1 To lo.ListColumns.Count
+            header = lo.ListColumns(i).Name
+            If saved.Exists(header) Then
+                position = position + 1
+                layout(position, 1) = header
+                layout(position, 2) = saved(header)
+            End If
+        Next i
+        Call ApplyLayout(wb, layout)
+    End If
+
+ExitPoint:
+    Set saved = Nothing
+    Set lo = Nothing
+    Set node = Nothing
+    Set nodes = Nothing
+    Set xml = Nothing
+    Set fso = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    None.
+' Returns:       None.
+' Description:   Open the layout editor for the active output workbook.
+'-------------------------------------------------------------------------------
+Public Sub OpenNeoColumnSettings()
+    Const METHOD_NAME As String = "OpenNeoColumnSettings"
+    Dim wbMaster As Workbook
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wbMaster = Application.ActiveWorkbook
+    Call ResetErrors
+    If wbMaster Is Nothing Then Err.Raise TOOL_ERROR + 150, METHOD_NAME, "No active workbook."
+    Call BuildSettingsEditor(wbMaster)
+    MsgBox "Open the 'Column settings' worksheet tab to edit your layout.", vbInformation, "NeoAdvices"
+
+ExitPoint:
+    Set wbMaster = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    wb: launcher workbook.
+' Returns:       Shared defaults folder or the local folder beside the launcher.
+' Description:   Resolve the configured preferences location before generating outputs.
+'-------------------------------------------------------------------------------
+Public Function LayoutDefaultsFolder(ByVal wb As Workbook) As String
+    Const METHOD_NAME As String = "LayoutDefaultsFolder"
+    Dim result As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    result = LayoutValue(wb, "Folder")
+    If Len(result) = 0 Then result = wb.Path & "\NeoAdvices_Settings"
+    If InStr(1, result, "://", vbTextCompare) > 0 Then
+        Err.Raise TOOL_ERROR + 164, METHOD_NAME, _
+            "Run ConfigureNeoSettingsFolder and choose a Windows or shared network folder."
+    End If
+    LayoutDefaultsFolder = result
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    None.
+' Returns:       None.
+' Description:   Choose and persist the shared defaults folder in the launcher.
+'-------------------------------------------------------------------------------
+Public Sub ConfigureNeoSettingsFolder()
+    Const METHOD_NAME As String = "ConfigureNeoSettingsFolder"
+    Dim wbMaster As Workbook
+    Dim picker As FileDialog
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wbMaster = Application.ActiveWorkbook
+    Call ResetErrors
+    If wbMaster Is Nothing Then Err.Raise TOOL_ERROR + 150, METHOD_NAME, "No active workbook."
+    If wbMaster.ReadOnly Or Len(wbMaster.Path) = 0 Then
+        Err.Raise TOOL_ERROR + 156, METHOD_NAME, "Use a saved, writable launcher workbook."
+    End If
+    If HasCopyMarker(wbMaster) Or HasNeoFlag(wbMaster, RESULT_MARKER) Then
+        Err.Raise TOOL_ERROR + 165, METHOD_NAME, "Configure the shared folder in the launcher."
+    End If
+    Set picker = Application.FileDialog(msoFileDialogFolderPicker)
+    picker.Title = "Choose a defaults folder accessible to the generator and Accountants"
+    If picker.Show = -1 Then
+        Call SetLayoutValue(wbMaster, "Folder", picker.SelectedItems(1))
+        wbMaster.Save
+        MsgBox "Shared defaults folder saved. Generate new output files with Run.", _
+            vbInformation, "NeoAdvices"
+    End If
+
+ExitPoint:
+    Set picker = Nothing
+    Set wbMaster = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
