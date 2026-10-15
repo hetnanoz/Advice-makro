@@ -142,7 +142,7 @@ Public Sub WriteDashboardCaption(ByVal ws As Worksheet, ByVal allocationDate As 
     With ws.Cells(10, 1)
         .Value2 = "NeoAdvices " & TOOL_VERSION & " | " & viewName & " | Allocation: " & _
             Format$(allocationDate, "dd/mm/yyyy") & " | Run: " & runStamp & " | " & BatModeCaption() & _
-            " | Layout UPDATE16 | Done / Doubt: double-click a box"
+            " | Layout UPDATE17 | Done / Doubt: double-click a box"
         .Font.Name = "Calibri"
         .Font.Size = 10
         .Font.Bold = True
@@ -1031,9 +1031,9 @@ Private Sub ApplyDashboardColumnWidths(ByVal ws As Worksheet, ByRef enriched As 
 
     ' The last two names come from original Neo columns Q/R, not moved Dashboard columns.
     ' Enrichment adds seven fields; therefore their source-array positions are 24/25.
-    headers = Array(HDR_KEY, HDR_STATUS, HDR_ISIN, HDR_SEC_CODE, HDR_CASH_CODE, _
+    headers = Array(HDR_FUND, HDR_GROUP, HDR_KEY, HDR_STATUS, HDR_ISIN, HDR_SEC_CODE, HDR_CASH_CODE, _
         CStr(enriched(1, 24)), CStr(enriched(1, 25)))
-    widths = Array(13.5, 11, 15, 14, 14, 9, 9)
+    widths = Array(8.5, 10.7, 13.5, 11, 15, 14, 14, 9, 9)
     For itemIndex = LBound(headers) To UBound(headers)
         columnIndex = GetColumnIndexByHeader(ws, DASH_HEADER_ROW, CStr(headers(itemIndex)))
         ws.Columns(columnIndex).ColumnWidth = CDbl(widths(itemIndex))
