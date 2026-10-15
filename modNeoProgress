@@ -24,7 +24,7 @@ Public Sub BuildProgressCounters(ByVal ws As Worksheet)
     For itemIndex = ws.Shapes.Count To 1 Step -1
         If Left$(ws.Shapes(itemIndex).Name, 12) = "neoProgress_" Then ws.Shapes(itemIndex).Delete
     Next itemIndex
-    titles = Array("All", "Cash", "Security + SecCash")
+    titles = Array("All", "Cash", "SecCash + Security + Other")
     positions = Array(6, 326, 596)
     widths = Array(310, 260, 350)
     For itemIndex = 0 To 2
@@ -107,7 +107,7 @@ Public Sub UpdateProgressCounters(ByVal ws As Worksheet)
                 category = -1
                 Select Case groupName
                     Case "CASH": category = 1
-                    Case "SECURITY", "SECCASH": category = 2
+                    Case "SECURITY", "SECCASH", "OTHER": category = 2
                 End Select
                 If category > 0 Then
                     total(category) = total(category) + 1
@@ -115,7 +115,7 @@ Public Sub UpdateProgressCounters(ByVal ws As Worksheet)
                 End If
             Next rowIndex
         End If
-        titles = Array("All", "Cash", "Security + SecCash")
+        titles = Array("All", "Cash", "SecCash + Security + Other")
         For itemIndex = 0 To 2
             Set box = ws.Shapes("neoProgress_" & CStr(itemIndex))
             counterText = CStr(done(itemIndex)) & " / " & CStr(total(itemIndex))
