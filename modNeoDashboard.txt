@@ -87,7 +87,7 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
     Call FormatHeader(lo.HeaderRowRange)
     Call ApplyDataFormatting(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
     Call FitDataColumns(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
-    ws.Rows("1:8").RowHeight = 21
+    ws.Rows("1:8").RowHeight = 24
     ws.Rows("9:10").RowHeight = 24
     Call CreateDashboardControls(wb, False)
     Call WriteDashboardCaption(ws, allocationDate, runStamp, "MASTER")
@@ -182,6 +182,8 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
     stepDescription = "Resolve Dashboard table"
     Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
     Set lo = ws.ListObjects(TABLE_DASHBOARD)
+    ws.Rows("1:8").RowHeight = 24
+    ws.Rows("9:10").RowHeight = 24
     stepDescription = "Remove old controls"
     Call RemoveAllSlicerCaches(wb)
     For itemIndex = ws.Shapes.Count To 1 Step -1
@@ -196,11 +198,9 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
         stepDescription = "Native slicer; field=" & CStr(fields(fieldIndex))
         Call CreateNativeTableSlicer(wb, ws, lo, CStr(fields(fieldIndex)), 6 + fieldIndex * 190)
     Next fieldIndex
-    captions = Array("ALL", "Cash", "SecCash", "Security", "SecCash + Security", "Import / Refresh")
-    macroNames = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", _
-        "FilterSecCashSecurity", "RunNeoAdvices")
+    captions = Array("ALL", "Cash", "SecCash", "Security", "SecCash + Security")
+    macroNames = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", "FilterSecCashSecurity")
     lastButton = 4
-    If Not individual Then lastButton = 5
     leftPosition = 6
     topPosition = ws.Rows(9).Top + 1
     For buttonIndex = 0 To lastButton
@@ -227,6 +227,8 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
         button.OnAction = ownerMacro
         leftPosition = leftPosition + buttonWidth + 6
     Next buttonIndex
+    stepDescription = "Build progress counters"
+    Call BuildProgressCounters(ws)
 
 ExitPoint:
     Set button = Nothing
@@ -263,12 +265,7 @@ Public Sub RebindDashboardButtons(ByVal wb As Workbook, ByVal savedFileName As S
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
-    If HasCopyMarker(wb) Then
-        names = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", "FilterSecCashSecurity")
-    Else
-        names = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", _
-            "FilterSecCashSecurity", "RunNeoAdvices")
-    End If
+    names = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", "FilterSecCashSecurity")
     For itemIndex = LBound(names) To UBound(names)
         ws.Shapes("btnNeo_" & CStr(itemIndex + 1)).OnAction = _
             "'" & Replace(savedFileName, "'", "''") & "'!" & CStr(names(itemIndex))
@@ -709,10 +706,10 @@ Private Sub CreateNativeTableSlicer(ByVal wb As Workbook, ByVal ws As Worksheet,
     stepDescription = "Set caption; field=" & fieldName
     slicer.Caption = fieldName
     stepDescription = "Set layout; field=" & fieldName
-    slicer.Top = 4
+    slicer.Top = ws.Rows(4).Top + 3
     slicer.Left = leftPosition
     slicer.Width = 184
-    slicer.Height = 160
+    slicer.Height = 114
     slicer.NumberOfColumns = 1
     stepDescription = "Set placement; field=" & fieldName
     slicer.Shape.Placement = xlFreeFloating
