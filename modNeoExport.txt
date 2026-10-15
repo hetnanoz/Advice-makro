@@ -240,6 +240,7 @@ Public Sub TrimIndividualDashboard(ByVal wb As Workbook, ByVal accountantName As
         End If
     Next rowIndex
     Call ApplyDataFormatting(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + actualCount, lo.ListColumns.Count, True)
+    Call LoadAccountantLayout(wb, accountantName)
     Call CreateDashboardControls(wb, True)
     wb.Names.Add Name:=COPY_MARKER, RefersTo:="=TRUE", Visible:=False
     Call EnforceIndividualSheets(wb, includeSources)
