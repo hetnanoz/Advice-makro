@@ -1,0 +1,222 @@
+Option Explicit
+
+Private Const CLASS_NAME As String = "modNeoLauncher"
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   HasNeoFlag - UPDATE09.
+'-------------------------------------------------------------------------------
+Public Function HasNeoFlag(ByVal wb As Workbook, ByVal flagName As String) As Boolean
+    Const METHOD_NAME As String = "HasNeoFlag"
+    Dim item As Name
+    Dim shortName As String
+    Dim separator As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For Each item In wb.Names
+        shortName = item.Name
+        separator = InStrRev(shortName, "!")
+        If separator > 0 Then shortName = Mid$(shortName, separator + 1)
+        If StrComp(shortName, flagName, vbTextCompare) = 0 Then
+            HasNeoFlag = True
+            Exit For
+        End If
+    Next item
+
+ExitPoint:
+    Set item = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   LauncherSheet - UPDATE09.
+'-------------------------------------------------------------------------------
+Public Function LauncherSheet(ByVal wb As Workbook) As Worksheet
+    Const METHOD_NAME As String = "LauncherSheet"
+    Dim ws As Worksheet
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For Each ws In wb.Worksheets
+        If ws.Name = SHEET_RUN Or ws.Name = SHEET_DASHBOARD Then
+            If Not LauncherSheet Is Nothing Then
+                Err.Raise TOOL_ERROR + 130, METHOD_NAME, "The file contains both Run and Dashboard sheets."
+            End If
+            Set LauncherSheet = ws
+        End If
+    Next ws
+    If LauncherSheet Is Nothing Then
+        Err.Raise TOOL_ERROR + 131, METHOD_NAME, "Run/Dashboard template sheet is missing."
+    End If
+
+ExitPoint:
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   PrepareNeoLauncher - UPDATE09.
+'-------------------------------------------------------------------------------
+Public Sub PrepareNeoLauncher(ByVal wb As Workbook)
+    Const METHOD_NAME As String = "PrepareNeoLauncher"
+    Dim ws As Worksheet
+    Dim wsSource As Worksheet
+    Dim button As Shape
+    Dim sheetName As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If HasCopyMarker(wb) Or HasNeoFlag(wb, RESULT_MARKER) Then
+        Err.Raise TOOL_ERROR + 132, METHOD_NAME, "An output file cannot be converted to the launcher."
+    End If
+    Set ws = LauncherSheet(wb)
+    Call RemoveAllSlicerCaches(wb)
+    Call ClearWorksheetView(ws)
+    ws.Visible = xlSheetVisible
+    ws.Name = SHEET_RUN
+    For Each sheetName In Array(SHEET_NEO, SHEET_REPARTITION)
+        Set wsSource = RequiredSheet(wb, CStr(sheetName))
+        Call ClearWorksheetView(wsSource)
+        wsSource.Visible = xlSheetVeryHidden
+    Next sheetName
+    ws.Columns("A:H").ColumnWidth = 14
+    ws.Rows("1:14").RowHeight = 25
+    ws.Range("B2").Value2 = "NeoAdvices"
+    ws.Range("B2").Font.Size = 28
+    ws.Range("B2").Font.Bold = True
+    ws.Range("B4").Value2 = "Run the import to create a separate Master and accountant files."
+    ws.Range("B5").Value2 = "Results are saved in the selected output folder."
+    Set button = ws.Shapes.AddShape(msoShapeRoundedRectangle, 100, 165, 250, 70)
+    button.Name = "btnNeoRun"
+    button.TextFrame.Characters.Text = "Run"
+    button.TextFrame.Characters.Font.Size = 28
+    button.TextFrame.Characters.Font.Bold = True
+    button.TextFrame.Characters.Font.Color = RGB(255, 255, 255)
+    button.TextFrame.HorizontalAlignment = xlHAlignCenter
+    button.TextFrame.VerticalAlignment = xlVAlignCenter
+    button.Fill.ForeColor.RGB = RGB(31, 78, 121)
+    button.Line.Visible = msoFalse
+    button.OnAction = "'" & Replace(wb.Name, "'", "''") & "'!RunNeoAdvices"
+    If Not HasNeoFlag(wb, LAUNCHER_MARKER) Then
+        wb.Names.Add Name:=LAUNCHER_MARKER, RefersTo:="=TRUE", Visible:=False
+    End If
+    wb.Save
+
+ExitPoint:
+    Set button = Nothing
+    Set wsSource = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   SetupNeoLauncher - UPDATE09.
+'-------------------------------------------------------------------------------
+Public Sub SetupNeoLauncher()
+    Const METHOD_NAME As String = "SetupNeoLauncher"
+    Dim wbLauncher As Workbook
+    Dim ws As Worksheet
+    Dim state As TExcelState
+    Dim backupPath As String
+    Dim cleanupFailed As Boolean
+    Dim completed As Boolean
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set wbLauncher = Application.ActiveWorkbook
+    Call ResetErrors
+    If wbLauncher Is Nothing Then Err.Raise TOOL_ERROR + 133, METHOD_NAME, "No active workbook."
+    If wbLauncher.FileFormat <> xlOpenXMLWorkbookMacroEnabled Or Len(wbLauncher.Path) = 0 Then
+        Err.Raise TOOL_ERROR + 134, METHOD_NAME, "Save this file as XLSM before setup."
+    End If
+    If wbLauncher.ReadOnly Or wbLauncher.ProtectStructure Then
+        Err.Raise TOOL_ERROR + 135, METHOD_NAME, "The launcher must be writable and unprotected."
+    End If
+    If HasCopyMarker(wbLauncher) Or HasNeoFlag(wbLauncher, RESULT_MARKER) Then
+        Err.Raise TOOL_ERROR + 136, METHOD_NAME, "Use the original macro file, not an output file."
+    End If
+    If wbLauncher.Sheets.Count <> 3 Then
+        Err.Raise TOOL_ERROR + 137, METHOD_NAME, "Launcher setup expects the three original sheets."
+    End If
+    Set ws = RequiredSheet(wbLauncher, SHEET_NEO)
+    Set ws = RequiredSheet(wbLauncher, SHEET_REPARTITION)
+    Set ws = LauncherSheet(wbLauncher)
+    Application.EnableEvents = True
+    Call CaptureExcelState(state)
+    Call SuspendExcel
+    If Not HasNeoFlag(wbLauncher, LAUNCHER_MARKER) Then
+        backupPath = UniqueOutputPath(wbLauncher.Path, "NeoAdvices_BEFORE_LAUNCHER_" & _
+            Format$(Now, "ddmmyyyyhhnnss"))
+        wbLauncher.SaveCopyAs backupPath
+    End If
+    Call PrepareNeoLauncher(wbLauncher)
+    completed = True
+
+ExitPoint:
+    Call RestoreExcelStateSafe(state, cleanupFailed)
+    If cleanupFailed And errNumber = 0 Then errNumber = TOOL_ERROR + 138
+    If completed And errNumber = 0 Then
+        MsgBox "Launcher ready. Use the Run button." & vbCrLf & backupPath, vbInformation, "NeoAdvices"
+    End If
+    Set ws = Nothing
+    Set wbLauncher = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
