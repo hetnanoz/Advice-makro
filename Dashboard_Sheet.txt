@@ -18,6 +18,7 @@ Private Sub Worksheet_SelectionChange(ByVal Target As Range)
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     Set pLastSelection = Target
+    Call FreezeDashboardStatusColumns(Me)
 
 ExitPoint:
     If errNumber <> 0 Then Call DisplayErrors
@@ -182,6 +183,7 @@ Private Sub Worksheet_Change(ByVal Target As Range)
 
     Call ResetErrors
     Call UpdateProgressCounters(Me)
+    Call FreezeDashboardStatusColumns(Me)
 
 ExitPoint:
     If errNumber <> 0 Then Call DisplayErrors
@@ -211,6 +213,7 @@ Private Sub Worksheet_Activate()
     Set pLastSelection = Nothing
     Call ResetErrors
     Call UpdateProgressCounters(Me)
+    Call FreezeDashboardStatusColumns(Me)
 
 ExitPoint:
     If errNumber <> 0 Then Call DisplayErrors
