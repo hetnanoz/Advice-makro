@@ -99,6 +99,7 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
     Call FormatHeader(lo.HeaderRowRange)
     Call ApplyDataFormatting(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
     Call FitDataColumns(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
+    Call ApplyDashboardColumnWidths(ws, enriched)
     ws.Rows("1:8").RowHeight = 24
     ws.Rows("9:10").RowHeight = 24
     Call CreateDashboardControls(wb, False)
@@ -140,7 +141,7 @@ Public Sub WriteDashboardCaption(ByVal ws As Worksheet, ByVal allocationDate As 
     With ws.Cells(10, 1)
         .Value2 = "NeoAdvices " & TOOL_VERSION & " | " & viewName & " | Allocation: " & _
             Format$(allocationDate, "dd/mm/yyyy") & " | Run: " & runStamp & " | " & BatModeCaption() & _
-            " | Layout UPDATE14 | Done / Doubt: double-click a box"
+            " | Layout UPDATE15 | Done / Doubt: double-click a box"
         .Font.Name = "Calibri"
         .Font.Size = 10
         .Font.Bold = True
@@ -208,12 +209,13 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
     End If
     For fieldIndex = LBound(fields) To UBound(fields)
         stepDescription = "Native slicer; field=" & CStr(fields(fieldIndex))
-        Call CreateNativeTableSlicer(wb, ws, lo, CStr(fields(fieldIndex)), 6 + fieldIndex * 190)
+        Call CreateNativeTableSlicer(wb, ws, lo, CStr(fields(fieldIndex)), _
+            ws.Columns(3).Left + 6 + fieldIndex * 190)
     Next fieldIndex
     captions = Array("ALL", "Cash", "SecCash", "Security", "SecCash + Security")
     macroNames = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", "FilterSecCashSecurity")
     lastButton = 4
-    leftPosition = 6
+    leftPosition = ws.Columns(3).Left + 6
     topPosition = ws.Rows(9).Top + 1
     For buttonIndex = 0 To lastButton
         stepDescription = "Create button " & CStr(captions(buttonIndex))
@@ -924,8 +926,8 @@ Private Function DefaultDashboardColumnOrder(ByVal columnCount As Long) As Varia
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    ' Original layout: A, B, J, K, L, O, P, Q, U, V, W, X, Y, Z, AA.
-    preferred = Array(1, 2, 10, 11, 12, 15, 16, 17, 21, 22, 23, 24, 25, 26, 27)
+    ' Original pre-UPDATE13 layout: A, B, J, K, L, O, P, Q, S, U, V, W, X, Y, Z, AA.
+    preferred = Array(1, 2, 10, 11, 12, 15, 16, 17, 19, 21, 22, 23, 24, 25, 26, 27)
     If columnCount < 27 Then
         Err.Raise TOOL_ERROR + 126, METHOD_NAME, "Dashboard requires at least 27 source columns."
     End If
@@ -993,6 +995,47 @@ ExitPoint:
     Set shownSheet = Nothing
     Set view = Nothing
     Set wbMaster = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-15
+' Parameters:    ws: output Dashboard; enriched: original enriched source including headers.
+' Returns:       None.
+' Description:   UPDATE15: resolve fixed widths by header, independently of Dashboard positions.
+'-------------------------------------------------------------------------------
+Private Sub ApplyDashboardColumnWidths(ByVal ws As Worksheet, ByRef enriched As Variant)
+    Const METHOD_NAME As String = "ApplyDashboardColumnWidths"
+    Dim headers As Variant
+    Dim widths As Variant
+    Dim itemIndex As Long
+    Dim columnIndex As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    ' The last two names come from original Neo columns Q/R, not moved Dashboard columns.
+    ' Enrichment adds seven fields; therefore their source-array positions are 24/25.
+    headers = Array(HDR_KEY, HDR_STATUS, HDR_ISIN, HDR_SEC_CODE, HDR_CASH_CODE, _
+        CStr(enriched(1, 24)), CStr(enriched(1, 25)))
+    widths = Array(13.5, 11, 15, 14, 14, 9, 9)
+    For itemIndex = LBound(headers) To UBound(headers)
+        columnIndex = GetColumnIndexByHeader(ws, DASH_HEADER_ROW, CStr(headers(itemIndex)))
+        ws.Columns(columnIndex).ColumnWidth = CDbl(widths(itemIndex))
+    Next itemIndex
+
+ExitPoint:
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
     End If
