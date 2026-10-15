@@ -148,12 +148,23 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
     Dim statusValues As Variant
     Dim statusRow As Long
     Dim statusColumn As Long
+    Dim borderIndex As Variant
     Dim errNumber As Long
     Dim errDescription As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     firstRow = headerRow + 1
+    If isDashboard Then
+        For Each borderIndex In Array(xlEdgeLeft, xlEdgeTop, xlEdgeBottom, xlEdgeRight, _
+                                      xlInsideVertical, xlInsideHorizontal)
+            With ws.Cells(headerRow, 1).Resize(lastRow - headerRow + 1, lastColumn).Borders(borderIndex)
+                .LineStyle = xlContinuous
+                .Weight = xlThin
+                .Color = RGB(0, 0, 0)
+            End With
+        Next borderIndex
+    End If
     If lastRow >= firstRow Then
         Set body = ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, lastColumn))
         body.FormatConditions.Delete
@@ -162,9 +173,11 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
         body.Font.Bold = False
         body.Font.Name = "Calibri"
         body.Font.Size = 11
-        body.Borders.LineStyle = xlContinuous
-        body.Borders.Weight = xlHairline
-        body.Borders.Color = RGB(217, 217, 217)
+        If Not isDashboard Then
+            body.Borders.LineStyle = xlContinuous
+            body.Borders.Weight = xlHairline
+            body.Borders.Color = RGB(217, 217, 217)
+        End If
         numericHeaders = Array(HDR_QUANTITY, HDR_SEC_QUANTITY, HDR_CASH_AMOUNT)
         For Each header In numericHeaders
             quantityIndex = GetColumnIndexByHeader(ws, headerRow, CStr(header))
@@ -179,6 +192,10 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
             formula = "=(" & doneAddress & "<>""" & ChrW(&H2713) & """)*(" & _
                 doubtAddress & "<>""?"")*(" & groupAddress & "=""Cash"")"
             Call AddFillRule(body, formula, RGB(230, 240, 255))
+            formula = "=(" & doneAddress & "<>""" & ChrW(&H2713) & """)*(" & _
+                doubtAddress & "<>""?"")*((" & groupAddress & "=""SecCash"")+(" & _
+                groupAddress & "=""Security""))"
+            Call AddFillRule(body, formula, RGB(239, 230, 247))
             Call AddFillRule(body, "=" & doubtAddress & "=""?""", RGB(255, 217, 179))
             Call AddFillRule(body, "=" & doneAddress & "=""" & ChrW(&H2713) & """", RGB(198, 239, 206))
             Set statusRange = ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2))
