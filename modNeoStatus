@@ -255,13 +255,11 @@ End Sub
 ' Creation date: 2026-10-14
 ' Parameters:    See typed signature.
 ' Returns:       See typed signature.
-' Description:   EnableNeoInteraction - UPDATE06.
+' Description:   UPDATE10: enable events without requiring an output table in the launcher.
 '-------------------------------------------------------------------------------
 Public Sub EnableNeoInteraction()
     Const METHOD_NAME As String = "EnableNeoInteraction"
     Dim wbMaster As Workbook
-    Dim ws As Worksheet
-    Dim lo As ListObject
     Dim errNumber As Long
     Dim errDescription As String
 
@@ -270,17 +268,14 @@ Public Sub EnableNeoInteraction()
     Set wbMaster = Application.ActiveWorkbook
     Call ResetErrors
     If wbMaster Is Nothing Then Err.Raise TOOL_ERROR + 125, METHOD_NAME, "No active workbook."
-    Set ws = RequiredSheet(wbMaster, SHEET_DASHBOARD)
-    Set lo = ws.ListObjects(TABLE_DASHBOARD)
     ' This explicit repair command intentionally enables events; it is not temporary suspension.
     Application.EnableEvents = True
-    MsgBox "UPDATE06: zdarzenia Excela wlaczone." & vbCrLf & _
-        "Dwuklik w Done/Doubt albo zaznacz wiersze i kliknij prawym wewnatrz zaznaczenia." & vbCrLf & _
-        "Kod Dashboard_Sheet musi byc w module ARKUSZA Dashboard.", vbInformation, "NeoAdvices"
+    MsgBox "Excel events are enabled." & vbCrLf & _
+        "In the launcher, use Run to generate the output files." & vbCrLf & _
+        "In an output Dashboard, double-click Done/Doubt or right-click selected rows.", _
+        vbInformation, "NeoAdvices"
 
 ExitPoint:
-    Set lo = Nothing
-    Set ws = Nothing
     Set wbMaster = Nothing
     If errNumber <> 0 Then Call DisplayErrors
     Exit Sub
