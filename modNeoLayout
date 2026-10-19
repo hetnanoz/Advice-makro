@@ -133,7 +133,7 @@ Public Sub AddColumnSettingsButton(ByVal wb As Workbook)
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     Set ws = wb.Worksheets(SHEET_DASHBOARD)
-    Set button = ws.Shapes.AddShape(msoShapeRoundedRectangle, ws.Columns(3).Left + 730, _
+    Set button = ws.Shapes.AddShape(msoShapeRoundedRectangle, ws.Columns(4).Left + 730, _
         ws.Rows(9).Top + 1, 150, 22)
     button.Name = "btnNeo_ColumnSettings"
     button.TextFrame.Characters.Text = "Column settings"
@@ -201,8 +201,8 @@ Private Sub BuildSettingsEditor(ByVal wbMaster As Workbook)
         ws.Shapes(i).Delete
     Next i
     ws.Range("A1").Value2 = "COLUMN SETTINGS | " & LayoutValue(wbMaster, "Owner")
-    ws.Range("A2").Value2 = "Edit Order (unique numbers 3..N) and Width, then click Apply."
-    ws.Range("A3").Value2 = "Done/Doubt stay first. Apply clears filters; data and status marks are retained."
+    ws.Range("A2").Value2 = "Edit Order (unique numbers 4..N) and Width, then click Apply."
+    ws.Range("A3").Value2 = "Done/Doubt/Issue stay first. Apply clears filters; data and status marks are retained."
     ws.Range("A4").Value2 = "Defaults folder: " & LayoutValue(wbMaster, "Folder")
     ws.Range("A5").Value2 = "Save defaults affects future files. Save the workbook separately."
     ws.Range("A7").Value2 = "Order"
@@ -287,13 +287,15 @@ Private Function ReadEditorLayout(ByVal wb As Workbook) As Variant
         If header <> lo.ListColumns(i).Name Then
             Err.Raise TOOL_ERROR + 153, METHOD_NAME, "Column names or editor rows changed. Reopen settings."
         End If
-        If i <= 2 And rank <> i Then Err.Raise TOOL_ERROR + 154, METHOD_NAME, "Done/Doubt cannot move."
+        If i <= 3 And rank <> i Then Err.Raise TOOL_ERROR + 154, METHOD_NAME, "Done/Doubt/Issue cannot move."
         value = ws.Cells(i + 7, 3).Value2
         If IsError(value) Then Err.Raise TOOL_ERROR + 155, METHOD_NAME, "Invalid width."
         If Not IsNumeric(value) Then Err.Raise TOOL_ERROR + 155, METHOD_NAME, "Width must be numeric."
         width = CDbl(value)
         If width < 3 Or width > 80 Then Err.Raise TOOL_ERROR + 155, METHOD_NAME, "Width range: 3 to 80."
         result(rank, 1) = header
+        If i = 1 Then width = 6
+        If i = 2 Or i = 3 Then width = 5.5
         result(rank, 2) = width
     Next i
     ReadEditorLayout = result
@@ -444,8 +446,8 @@ Private Sub ApplyLayout(ByVal wb As Workbook, ByRef layout As Variant)
     If UBound(layout, 1) <> lo.ListColumns.Count Then
         Err.Raise TOOL_ERROR + 157, METHOD_NAME, "Layout does not match current columns."
     End If
-    If layout(1, 1) <> "Done" Or layout(2, 1) <> "Doubt" Then
-        Err.Raise TOOL_ERROR + 154, METHOD_NAME, "Done/Doubt must stay first."
+    If layout(1, 1) <> "Done" Or layout(2, 1) <> "Doubt" Or layout(3, 1) <> "Issue" Then
+        Err.Raise TOOL_ERROR + 154, METHOD_NAME, "Done/Doubt/Issue must stay first."
     End If
     source = lo.Range.Value2
     ReDim result(1 To UBound(source, 1), 1 To UBound(source, 2))
@@ -726,7 +728,7 @@ Private Sub SaveLayoutFile(ByVal wb As Workbook, ByRef layout As Variant)
     Set xml = CreateObject("MSXML2.DOMDocument.6.0")
     Set rootNode = xml.createElement("layout")
     rootNode.setAttribute "owner", LayoutValue(wb, "Owner")
-    rootNode.setAttribute "schema", "21"
+    rootNode.setAttribute "schema", "24"
     xml.appendChild rootNode
     For i = 1 To UBound(layout, 1)
         Set node = xml.createElement("column")
@@ -803,9 +805,16 @@ Public Sub LoadAccountantLayout(ByVal wb As Workbook, ByVal accountantName As St
             saved.Add lo.ListColumns(i).Name, lo.ListColumns(i).Range.ColumnWidth
         Next i
         ReDim layout(1 To lo.ListColumns.Count, 1 To 2)
+        For i = 1 To 3
+            header = lo.ListColumns(i).Name
+            layout(i, 1) = header
+            layout(i, 2) = lo.ListColumns(i).Range.ColumnWidth
+            saved.Remove header
+        Next i
+        position = 3
         Set nodes = xml.selectNodes("/layout/column")
         For Each node In nodes
-            header = CStr(node.getAttribute("name"))
+            header = DashboardHeader(CStr(node.getAttribute("name")))
             If saved.Exists(header) Then
                 position = position + 1
                 layout(position, 1) = header
@@ -825,7 +834,7 @@ Public Sub LoadAccountantLayout(ByVal wb As Workbook, ByVal accountantName As St
         schemaVersion = xml.documentElement.getAttribute("schema")
         If IsNull(schemaVersion) Then
             Call UpgradeLegacyLayout(wb, layout)
-        ElseIf CStr(schemaVersion) <> "21" Then
+        ElseIf CStr(schemaVersion) <> "21" And CStr(schemaVersion) <> "24" Then
             Call UpgradeLegacyLayout(wb, layout)
         End If
         Call ApplyLayout(wb, layout)
@@ -991,15 +1000,15 @@ Private Sub UpgradeLegacyLayout(ByVal wb As Workbook, ByRef layout As Variant)
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     ' Positions refer to the captured UPDATE21 default, never the user's live layout.
-    descriptionHeader = LayoutValue(wb, "Header8")
-    bankHeader = "4_D_GL_Bank Ref"
+    descriptionHeader = LayoutValue(wb, "Header9")
+    bankHeader = DashboardHeader("4_D_GL_Bank Ref")
     mffaHeader = "MFFA description"
     Set entries = CreateObject("Scripting.Dictionary")
     entries.CompareMode = vbTextCompare
     For i = 1 To UBound(layout, 1)
         entries.Add CStr(layout(i, 1)), CDbl(layout(i, 2))
     Next i
-    changedPositions = Array(7, 8, 9, 12, 13, 15, 17, 18, 19, 20)
+    changedPositions = Array(8, 9, 10, 13, 14, 16, 18, 19, 20, 21)
     For Each item In changedPositions
         header = LayoutValue(wb, "Header" & CStr(item))
         If Not entries.Exists(header) Then
@@ -1014,7 +1023,7 @@ Private Sub UpgradeLegacyLayout(ByVal wb As Workbook, ByRef layout As Variant)
             position = position + 1
             revised(position, 1) = header
             revised(position, 2) = entries(header)
-            If header = HDR_STATUS Then
+            If header = DashboardHeader(HDR_STATUS) Then
                 position = position + 1
                 revised(position, 1) = descriptionHeader
                 revised(position, 2) = entries(descriptionHeader)
