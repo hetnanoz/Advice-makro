@@ -204,9 +204,14 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
                 ws.Range(ws.Cells(firstRow, quantityIndex), ws.Cells(lastRow, quantityIndex)).Font.Bold = True
             Next header
             formula = "=(" & doneAddress & "<>""" & ChrW(&H2713) & """)*(" & _
-                doubtAddress & "<>""?"")*((" & groupAddress & "=""SecCash"")+(" & _
-                groupAddress & "=""Security""))"
+                doubtAddress & "<>""?"")*(" & groupAddress & "=""SecCash"")"
             Call AddFillRule(body, formula, RGB(239, 230, 247))
+            formula = "=(" & doneAddress & "<>""" & ChrW(&H2713) & """)*(" & _
+                doubtAddress & "<>""?"")*(" & groupAddress & "=""Security"")"
+            Call AddFillRule(body, formula, RGB(221, 235, 247))
+            formula = "=(" & doneAddress & "<>""" & ChrW(&H2713) & """)*(" & _
+                doubtAddress & "<>""?"")*(" & groupAddress & "=""Other"")"
+            Call AddFillRule(body, formula, RGB(235, 235, 235))
             Call AddFillRule(body, "=" & doubtAddress & "=""?""", RGB(255, 217, 179))
             Call AddFillRule(body, "=" & doneAddress & "=""" & ChrW(&H2713) & """", RGB(198, 239, 206))
             Set issueRange = ws.Range(ws.Cells(firstRow, 3), ws.Cells(lastRow, 3))
