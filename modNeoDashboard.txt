@@ -181,7 +181,7 @@ Public Sub WriteDashboardCaption(ByVal ws As Worksheet, ByVal allocationDate As 
     With ws.Cells(10, 1)
         .Value2 = "NeoAdvices " & TOOL_VERSION & " | " & viewName & " | Allocation: " & _
             Format$(allocationDate, "dd/mm/yyyy") & " | Run: " & runStamp & " | " & BatModeCaption() & _
-            " | Layout UPDATE24 | Done / Doubt / Issue: double-click a box"
+            " | Layout UPDATE26 | Done / Doubt / Issue: double-click a box"
         .Font.Name = "Calibri"
         .Font.Size = 10
         .Font.Bold = True
@@ -1031,9 +1031,12 @@ Public Sub FreezeDashboardStatusColumns(ByVal ws As Worksheet)
         For Each view In wbMaster.Windows
             Set shownSheet = view.ActiveSheet
             If shownSheet Is ws Then
-                If Not view.FreezePanes Or view.SplitColumn <> 3 Then
+                If Not view.FreezePanes Or view.SplitColumn <> 3 Or view.SplitRow <> DASH_HEADER_ROW Then
                     view.FreezePanes = False
+                    view.ScrollRow = 1
+                    view.ScrollColumn = 1
                     view.SplitColumn = 3
+                    view.SplitRow = DASH_HEADER_ROW
                     view.FreezePanes = True
                 End If
             End If
