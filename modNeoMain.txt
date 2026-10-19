@@ -138,6 +138,9 @@ Public Sub RunNeoAdvices()
     Dim stagingFolder As String
     Dim finalFolder As String
     Dim backupPath As String
+    Dim localCleanupFailed As Boolean
+    Dim expectedFiles As Long
+    Dim localFolderNote As String
     Dim runStamp As String
     Dim neoLastRow As Long
     Dim neoLastColumn As Long
@@ -175,12 +178,14 @@ Public Sub RunNeoAdvices()
     If Len(neoPath) > 0 And Len(repPath) > 0 And Len(outputFolder) > 0 Then
         Call ValidateInputPaths(neoPath, repPath)
         Call SuspendExcel
-        Application.StatusBar = "NeoAdvices: validating inputs..."
+        Application.StatusBar = "NeoAdvices: opening NeoAdvices input..."
         Set wbNeo = AcquireInputWorkbook(neoPath, neoOpenedByTool)
+        Application.StatusBar = "NeoAdvices: opening Repartition input..."
         Set wbRepartition = AcquireInputWorkbook(repPath, repartitionOpenedByTool)
         If wbNeo.Date1904 <> wbLauncher.Date1904 Or wbRepartition.Date1904 <> wbLauncher.Date1904 Then
             Err.Raise TOOL_ERROR + 81, METHOD_NAME, "Inputs and Master must use the same Excel date system."
         End If
+        Application.StatusBar = "NeoAdvices: validating input sheets and headers..."
         Set wsNeoInput = ResolveInputSheet(wbNeo, True)
         Set wsRepInput = ResolveInputSheet(wbRepartition, False)
         Call GetDataBounds(wsNeoInput, neoLastRow, neoLastColumn)
@@ -196,12 +201,13 @@ Public Sub RunNeoAdvices()
         Call ValidateRepartition(wsRepInput)
         selected = ChooseAllocationColumn(wsRepInput, allocationColumn, allocationDate)
         If selected Then
+            Application.StatusBar = "NeoAdvices: reading inputs and assigning Accountants..."
             sourceNeo = wsNeoInput.Cells(1, 1).Resize(neoLastRow, neoLastColumn).Value2
             sourceRep = wsRepInput.Cells(1, 1).Resize(repLastRow, repLastColumn).Value2
             Set allocations = BuildAllocationDictionary(sourceRep, allocationColumn)
             enriched = BuildEnrichedData(wsNeoInput, sourceNeo, allocations)
             runStamp = Format$(Now, "ddmmyyyyhhnnss")
-            stagingFolder = CreateRunFolder(outputFolder, runStamp)
+            stagingFolder = CreateLocalRunFolder(runStamp)
             If Not HasNeoFlag(wbLauncher, LAUNCHER_MARKER) Then
                 backupPath = UniqueOutputPath(stagingFolder, "Macro_BEFORE_LAUNCHER_" & runStamp)
                 wbLauncher.SaveCopyAs backupPath
@@ -264,7 +270,14 @@ Public Sub RunNeoAdvices()
             Set wsDashboard = Nothing
             wbMaster.Close SaveChanges:=False
             Set wbMaster = Nothing
-            finalFolder = FinalizeRunFolder(stagingFolder)
+            expectedFiles = counts.Count + 1
+            If Len(backupPath) > 0 Then expectedFiles = expectedFiles + 1
+            Application.StatusBar = "NeoAdvices: transferring completed files to destination..."
+            finalFolder = PublishLocalRun(stagingFolder, outputFolder, runStamp, expectedFiles)
+            Call CleanupPublishedLocalRun(stagingFolder, finalFolder, localCleanupFailed)
+            If localCleanupFailed Then
+                localFolderNote = vbCrLf & "Local temporary copy retained: " & stagingFolder
+            End If
             stagingFolder = vbNullString
             completed = True
         End If
@@ -286,14 +299,14 @@ ExitPoint:
     End If
     If errNumber <> 0 And Len(stagingFolder) > 0 Then
         Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, _
-            "An IN_PROGRESS folder remains. The launcher contains no imported results.")
+            "Incomplete run: local files retained at " & stagingFolder)
     End If
     If completed And errNumber = 0 Then
         MsgBox "Gotowe." & vbCrLf & "Instrukcje: " & CStr(neoLastRow - 1) & vbCrLf & _
             "Pliki Accountantow: " & CStr(counts.Count) & vbCrLf & _
             "UNASSIGNED: " & CStr(unassignedCount) & vbCrLf & _
             "Data alokacji: " & Format$(allocationDate, "dd/mm/yyyy") & vbCrLf & _
-            "Folder: " & finalFolder, vbInformation, "NeoAdvices"
+            "Folder: " & finalFolder & localFolderNote, vbInformation, "NeoAdvices"
     End If
     Set counts = Nothing
     Set allocations = Nothing
