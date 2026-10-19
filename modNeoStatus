@@ -27,7 +27,7 @@ Public Sub ApplyNeoStatus(ByVal ws As Worksheet, ByVal target As Range, ByVal mo
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
-    If mode < 0 Or mode > 2 Then
+    If mode < 0 Or mode > 4 Then
         Err.Raise TOOL_ERROR + 120, METHOD_NAME, "Unknown status mode."
     End If
     If Not target.Parent Is ws Then
@@ -60,10 +60,16 @@ Public Sub ApplyNeoStatus(ByVal ws As Worksheet, ByVal target As Range, ByVal mo
         Application.EnableEvents = False
         Application.ScreenUpdating = False
         For Each key In rowKeys.Keys
-            lo.DataBodyRange.Rows(CLng(key)).Cells(1, 1).Resize(1, 2).Value2 = marks
+            If mode <= 2 Then
+                lo.DataBodyRange.Rows(CLng(key)).Cells(1, 1).Resize(1, 2).Value2 = marks
+            ElseIf mode = 3 Then
+                lo.ListColumns("Issue").DataBodyRange.Cells(CLng(key), 1).Value2 = ChrW(&H2713)
+            Else
+                lo.ListColumns("Issue").DataBodyRange.Cells(CLng(key), 1).Value2 = ChrW(&H2610)
+            End If
         Next key
         ' Existing conditional formats preserve CANC backgrounds and movement font colors.
-        Call UpdateProgressCounters(ws)
+        If mode <= 2 Then Call UpdateProgressCounters(ws)
         ws.Calculate
     End If
 
@@ -112,10 +118,11 @@ Public Function ChooseNeoStatus(ByVal wb As Workbook) As Long
 
     pMenuChoice = -1
     captions = Array("Done - selected visible rows", "Doubt - selected visible rows", _
-        "Clear status - selected visible rows")
-    macros = Array("NeoMenuDone", "NeoMenuDoubt", "NeoMenuClear")
+        "Clear Done/Doubt - selected visible rows", _
+        "Issue - selected visible rows", "Clear Issue - selected visible rows")
+    macros = Array("NeoMenuDone", "NeoMenuDoubt", "NeoMenuClear", "NeoMenuIssue", "NeoMenuClearIssue")
     Set popup = Application.CommandBars.Add(Position:=msoBarPopup, Temporary:=True)
-    For index = 0 To 2
+    For index = LBound(captions) To UBound(captions)
         Set button = popup.Controls.Add(Type:=msoControlButton, Temporary:=True)
         button.Caption = CStr(captions(index))
         button.Style = msoButtonCaption
@@ -277,6 +284,50 @@ Public Sub EnableNeoInteraction()
 
 ExitPoint:
     Set wbMaster = Nothing
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+' UPDATE24: Set the Issue action selected in the temporary menu.
+Public Sub NeoMenuIssue()
+    Const METHOD_NAME As String = "NeoMenuIssue"
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    pMenuChoice = 3
+
+ExitPoint:
+    If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+
+' UPDATE24: Set the Issue action selected in the temporary menu.
+Public Sub NeoMenuClearIssue()
+    Const METHOD_NAME As String = "NeoMenuClearIssue"
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    pMenuChoice = 4
+
+ExitPoint:
     If errNumber <> 0 Then Call DisplayErrors
     Exit Sub
 
