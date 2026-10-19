@@ -200,7 +200,8 @@ End Function
 '-------------------------------------------------------------------------------
 Public Sub TrimIndividualDashboard(ByVal wb As Workbook, ByVal accountantName As String, _
                                    ByVal expectedCount As Long, _
-                                   Optional ByVal includeSources As Boolean = False)
+                                   Optional ByVal includeSources As Boolean = False, _
+                                   Optional ByRef groupedData As Variant)
     Const METHOD_NAME As String = "TrimIndividualDashboard"
     Dim ws As Worksheet
     Dim lo As ListObject
@@ -215,7 +216,7 @@ Public Sub TrimIndividualDashboard(ByVal wb As Workbook, ByVal accountantName As
 
     Set ws = RequiredSheet(wb, SHEET_DASHBOARD)
     Set lo = ws.ListObjects(TABLE_DASHBOARD)
-    Call RemoveAllSlicerCaches(wb)
+    Call modNeoDashboard.RemoveAllSlicerCaches(wb)
     If lo.AutoFilter.FilterMode Then lo.AutoFilter.ShowAllData
     If lo.DataBodyRange Is Nothing Then
         Err.Raise TOOL_ERROR + 53, METHOD_NAME, "The copied Dashboard has no data rows."
@@ -223,12 +224,17 @@ Public Sub TrimIndividualDashboard(ByVal wb As Workbook, ByVal accountantName As
     fieldIndex = lo.ListColumns(HDR_ACCOUNTANT).Index
     ' Rebuild the same rules once after deletion to avoid fragmented conditional formats.
     lo.DataBodyRange.FormatConditions.Delete
-    values = lo.DataBodyRange.Value2
-    For rowIndex = UBound(values, 1) To 1 Step -1
-        If StrComp(CleanText(values(rowIndex, fieldIndex)), accountantName, vbTextCompare) <> 0 Then
-            lo.ListRows(rowIndex).Delete
-        End If
-    Next rowIndex
+    If IsMissing(groupedData) Then
+        ' Compatibility path for callers outside the normal grouped export.
+        values = lo.DataBodyRange.Value2
+        For rowIndex = UBound(values, 1) To 1 Step -1
+            If StrComp(CleanText(values(rowIndex, fieldIndex)), accountantName, vbTextCompare) <> 0 Then
+                lo.ListRows(rowIndex).Delete
+            End If
+        Next rowIndex
+    Else
+        Call PopulateGroupedRows(lo, groupedData, accountantName, expectedCount)
+    End If
     actualCount = lo.ListRows.Count
     If actualCount <> expectedCount Or actualCount = 0 Then
         Err.Raise TOOL_ERROR + 54, METHOD_NAME, "Individual Dashboard row-count validation failed."
@@ -271,7 +277,7 @@ End Sub
 Private Sub SaveIndividualCopy(ByVal wbMaster As Workbook, ByVal filePath As String, _
                                ByVal accountantName As String, ByVal expectedCount As Long, _
                                ByVal allocationDate As Date, ByVal runStamp As String, _
-                               ByVal includeSources As Boolean)
+                               ByVal includeSources As Boolean, ByRef groupedData As Variant)
     Const METHOD_NAME As String = "SaveIndividualCopy"
     Dim wbIndividual As Workbook
     Dim fso As Object
@@ -292,7 +298,7 @@ Private Sub SaveIndividualCopy(ByVal wbMaster As Workbook, ByVal filePath As Str
     Set wbIndividual = Application.Workbooks.Open(Filename:=filePath, UpdateLinks:=0, ReadOnly:=False, _
         IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
     If wbIndividual.ReadOnly Then Err.Raise TOOL_ERROR + 57, METHOD_NAME, "Individual copy opened read-only."
-    Call TrimIndividualDashboard(wbIndividual, accountantName, expectedCount, includeSources)
+    Call TrimIndividualDashboard(wbIndividual, accountantName, expectedCount, includeSources, groupedData)
     Call WriteDashboardCaption(wbIndividual.Worksheets(SHEET_DASHBOARD), _
         allocationDate, runStamp, accountantName)
     With wbIndividual.Worksheets(SHEET_DASHBOARD).Cells(10, 1)
@@ -342,6 +348,11 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
                                    ByVal counts As Object)
     Const METHOD_NAME As String = "GenerateAccountantFiles"
     Dim accountant As Variant
+    Dim sourceData As Variant
+    Dim groupedData As Variant
+    Dim groups As Object
+    Dim rowNumbers As Collection
+    Dim sourceTable As ListObject
     Dim filePath As String
     Dim completed As Long
     Dim includeSources As Boolean
@@ -368,6 +379,15 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
     Application.AutomationSecurity = msoAutomationSecurityForceDisable
     Application.EnableCancelKey = xlErrorHandler
     Set wbSource = wbMaster
+    If counts.Count > 0 Then
+        Application.StatusBar = "NeoAdvices UPDATE20: grouping instructions in memory..."
+        Set sourceTable = wbMaster.Worksheets(SHEET_DASHBOARD).ListObjects(TABLE_DASHBOARD)
+        If sourceTable.DataBodyRange Is Nothing Then
+            Err.Raise TOOL_ERROR + 170, METHOD_NAME, "Dashboard is empty but Accountant counts are not."
+        End If
+        sourceData = sourceTable.DataBodyRange.Value2
+        Set groups = GroupAccountantRows(sourceData, sourceTable.ListColumns(HDR_ACCOUNTANT).Index, counts)
+    End If
     If counts.Count > 0 And Not includeSources Then
         Application.Calculation = xlCalculationManual
         Set fso = CreateObject("Scripting.FileSystemObject")
@@ -400,7 +420,7 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
         wbTemplate.Worksheets(SHEET_DASHBOARD).Visible = xlSheetVisible
         stepDescription = "3/6 - removing template slicer caches"
         Application.StatusBar = "NeoAdvices UPDATE08: " & stepDescription
-        Call RemoveAllSlicerCaches(wbTemplate)
+        Call modNeoDashboard.RemoveAllSlicerCaches(wbTemplate)
         stepDescription = "4/6 - deleting both source sheets (calculation suspended)"
         Application.StatusBar = "NeoAdvices UPDATE08: " & stepDescription
         wbTemplate.Worksheets(Array(SHEET_NEO, SHEET_REPARTITION)).Delete
@@ -431,11 +451,20 @@ Public Sub GenerateAccountantFiles(ByVal wbMaster As Workbook, ByVal folderPath 
         Application.StatusBar = "NeoAdvices UPDATE08: " & stepDescription
         filePath = UniqueOutputPath(folderPath, _
             "NeoAdvices_" & CleanFileName(CStr(accountant)) & "_" & runStamp)
+        Set rowNumbers = groups(CStr(accountant))
+        groupedData = ExtractAccountantRows(sourceData, rowNumbers)
         Call SaveIndividualCopy(wbSource, filePath, CStr(accountant), _
-            CLng(counts(accountant)), allocationDate, runStamp, includeSources)
+            CLng(counts(accountant)), allocationDate, runStamp, includeSources, groupedData)
+        groupedData = Empty
+        Set rowNumbers = Nothing
     Next accountant
 
 ExitPoint:
+    Set sourceTable = Nothing
+    Set rowNumbers = Nothing
+    Set groups = Nothing
+    sourceData = Empty
+    groupedData = Empty
     Set wbSource = Nothing
     Call CloseWorkbookSafe(wbTemplate, cleanupFailed)
     Call QuitExportExcelSafe(workerExcel, cleanupFailed)
@@ -651,4 +680,181 @@ Private Sub QuitExportExcelSafe(ByRef workerExcel As Excel.Application, ByRef ha
     Else
         Set workerExcel = Nothing
     End If
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-16
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE20: GroupAccountantRows for grouped Accountant export.
+'-------------------------------------------------------------------------------
+Private Function GroupAccountantRows(ByRef sourceData As Variant, ByVal ownerColumn As Long, _
+                                    ByVal counts As Object) As Object
+    Const METHOD_NAME As String = "GroupAccountantRows"
+    Dim groups As Object
+    Dim rowNumbers As Collection
+    Dim rowIndex As Long
+    Dim owner As String
+    Dim key As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set groups = CreateObject("Scripting.Dictionary")
+    groups.CompareMode = vbTextCompare
+    For rowIndex = 1 To UBound(sourceData, 1)
+        owner = CleanText(sourceData(rowIndex, ownerColumn))
+        If Len(owner) = 0 Or Not counts.Exists(owner) Then
+            Err.Raise TOOL_ERROR + 171, METHOD_NAME, "Dashboard contains an unexpected Accountant."
+        End If
+        If Not groups.Exists(owner) Then
+            Set rowNumbers = New Collection
+            groups.Add owner, rowNumbers
+        End If
+        Set rowNumbers = groups(owner)
+        rowNumbers.Add rowIndex
+    Next rowIndex
+    If groups.Count <> counts.Count Then
+        Err.Raise TOOL_ERROR + 172, METHOD_NAME, "Accountant groups differ from expected counts."
+    End If
+    For Each key In counts.Keys
+        If Not groups.Exists(CStr(key)) Then
+            Err.Raise TOOL_ERROR + 172, METHOD_NAME, "An expected Accountant group is missing."
+        End If
+        Set rowNumbers = groups(CStr(key))
+        If rowNumbers.Count <> CLng(counts(key)) Then
+            Err.Raise TOOL_ERROR + 173, METHOD_NAME, "Grouped instruction count validation failed."
+        End If
+    Next key
+    Set GroupAccountantRows = groups
+
+ExitPoint:
+    Set rowNumbers = Nothing
+    Set groups = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-16
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE20: ExtractAccountantRows for grouped Accountant export.
+'-------------------------------------------------------------------------------
+Private Function ExtractAccountantRows(ByRef sourceData As Variant, _
+                                      ByVal rowNumbers As Collection) As Variant
+    Const METHOD_NAME As String = "ExtractAccountantRows"
+    Dim result() As Variant
+    Dim rowIndex As Long
+    Dim columnIndex As Long
+    Dim sourceRow As Variant
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    If rowNumbers.Count = 0 Then
+        Err.Raise TOOL_ERROR + 174, METHOD_NAME, "Cannot export an empty Accountant group."
+    End If
+    ReDim result(1 To rowNumbers.Count, 1 To UBound(sourceData, 2))
+    ' Iterate the collection once; avoid repeated indexed access to its linked list.
+    For Each sourceRow In rowNumbers
+        rowIndex = rowIndex + 1
+        For columnIndex = 1 To UBound(sourceData, 2)
+            result(rowIndex, columnIndex) = sourceData(CLng(sourceRow), columnIndex)
+        Next columnIndex
+    Next sourceRow
+    ExtractAccountantRows = result
+
+ExitPoint:
+
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-16
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE20: PopulateGroupedRows for grouped Accountant export.
+'-------------------------------------------------------------------------------
+Private Sub PopulateGroupedRows(ByVal lo As ListObject, ByRef groupedData As Variant, _
+                                ByVal accountantName As String, ByVal expectedCount As Long)
+    Const METHOD_NAME As String = "PopulateGroupedRows"
+    Dim ws As Worksheet
+    Dim oldBody As Range
+    Dim newTable As Range
+    Dim oldRowCount As Long
+    Dim rowIndex As Long
+    Dim ownerColumn As Long
+    Dim columnCount As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set ws = lo.Parent
+    Set oldBody = lo.DataBodyRange
+    oldRowCount = oldBody.Rows.Count
+    columnCount = lo.ListColumns.Count
+    ownerColumn = lo.ListColumns(HDR_ACCOUNTANT).Index
+    If Not IsArray(groupedData) Then
+        Err.Raise TOOL_ERROR + 175, METHOD_NAME, "Accountant data is not an array."
+    End If
+    If LBound(groupedData, 1) <> 1 Or LBound(groupedData, 2) <> 1 Or _
+       UBound(groupedData, 1) <> expectedCount Or UBound(groupedData, 2) <> columnCount Then
+        Err.Raise TOOL_ERROR + 176, METHOD_NAME, "Accountant array dimensions do not match the table."
+    End If
+    If expectedCount < 1 Or expectedCount > oldRowCount Then
+        Err.Raise TOOL_ERROR + 177, METHOD_NAME, "Invalid Accountant row count."
+    End If
+    For rowIndex = 1 To expectedCount
+        If StrComp(CleanText(groupedData(rowIndex, ownerColumn)), accountantName, vbTextCompare) <> 0 Then
+            Err.Raise TOOL_ERROR + 178, METHOD_NAME, "Accountant array ownership validation failed."
+        End If
+    Next rowIndex
+    ' Keep the table/header and column formats; replace values in one operation.
+    ' Clear ALL old instructions, including the tail outside the resized table.
+    oldBody.ClearContents
+    Set newTable = lo.HeaderRowRange.Resize(expectedCount + 1, columnCount)
+    lo.Resize newTable
+    If oldRowCount > expectedCount Then
+        oldBody.Cells(expectedCount + 1, 1).Resize(oldRowCount - expectedCount, columnCount).Clear
+    End If
+    lo.DataBodyRange.Value2 = groupedData
+
+ExitPoint:
+    Set newTable = Nothing
+    Set oldBody = Nothing
+    Set ws = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
 End Sub
