@@ -764,6 +764,14 @@ Public Function DashboardHeader(ByVal technicalName As String) As String
             DashboardHeader = "Cash Movement Code"
         Case "152_EV_CM_Posting Amount"
             DashboardHeader = "Cash Posting Amount"
+        Case "32_AF_CA_Old Sec Des"
+            DashboardHeader = "Security Description"
+        Case "125_DU_SM_ISIN"
+            DashboardHeader = "Security Movement ISIN"
+        Case "153_EW_CM_Ccy"
+            DashboardHeader = "CCY1"
+        Case "206_GX_FX_Ccy"
+            DashboardHeader = "CCY2"
         Case Else
             DashboardHeader = technicalName
     End Select
