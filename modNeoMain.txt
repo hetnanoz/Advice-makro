@@ -119,6 +119,9 @@ Public Sub RunNeoAdvices()
     Dim wbMaster As Workbook
     Dim wbLauncher As Workbook
     Dim masterPath As String
+    Dim savePathCell As Range
+    Dim savedPathValue As Variant
+    Dim runDate As Date
     Dim wbNeo As Workbook
     Dim wbRepartition As Workbook
     Dim neoOpenedByTool As Boolean
@@ -159,6 +162,7 @@ Public Sub RunNeoAdvices()
     Set wbLauncher = Application.ActiveWorkbook
     Call ResetErrors
     Call ValidateMaster(wbLauncher)
+    runDate = Date
     ' User-requested persistent repair: start each run with Dashboard interaction enabled.
     ' Capture this intended baseline before temporarily suspending events for processing.
     Application.EnableEvents = True
@@ -166,7 +170,7 @@ Public Sub RunNeoAdvices()
     neoPath = PickInputFile("Wybierz plik 1: NeoAdvices Export (.xlsx)")
     If Len(neoPath) > 0 Then
         repPath = PickInputFile("Wybierz plik 2: WARSAW FA9 Repartition (.xlsx)")
-        If Len(repPath) > 0 Then outputFolder = PickOutputFolder()
+        If Len(repPath) > 0 Then outputFolder = NeoDailyOutputFolder(wbLauncher, runDate)
     End If
     If Len(neoPath) > 0 And Len(repPath) > 0 And Len(outputFolder) > 0 Then
         Call ValidateInputPaths(neoPath, repPath)
@@ -185,7 +189,7 @@ Public Sub RunNeoAdvices()
             Err.Raise TOOL_ERROR + 82, METHOD_NAME, "An input has headers but no data records."
         End If
         If neoLastRow + DASH_HEADER_ROW - 1 > wsNeoInput.Rows.Count Or _
-           neoLastColumn + ADDED_COLUMNS + 2 > wsNeoInput.Columns.Count Then
+           neoLastColumn + ADDED_COLUMNS + 4 > wsNeoInput.Columns.Count Then
             Err.Raise TOOL_ERROR + 83, METHOD_NAME, "The enriched output would exceed Excel worksheet limits."
         End If
         Call ValidateNeoHeaders(wsNeoInput, neoLastColumn)
@@ -201,7 +205,13 @@ Public Sub RunNeoAdvices()
             If Not HasNeoFlag(wbLauncher, LAUNCHER_MARKER) Then
                 backupPath = UniqueOutputPath(stagingFolder, "Macro_BEFORE_LAUNCHER_" & runStamp)
                 wbLauncher.SaveCopyAs backupPath
+                Set savePathCell = NeoSavePathCell(wbLauncher)
+                If Not savePathCell Is Nothing Then savedPathValue = savePathCell.Value2
                 Call PrepareNeoLauncher(wbLauncher)
+                If Not savePathCell Is Nothing Then
+                    savePathCell.Value2 = savedPathValue
+                    wbLauncher.Save
+                End If
             Else
                 wbLauncher.Save
             End If
@@ -220,7 +230,7 @@ Public Sub RunNeoAdvices()
             Set wsNeo = RequiredSheet(wbMaster, SHEET_NEO)
             Set wsRep = RequiredSheet(wbMaster, SHEET_REPARTITION)
             Set wsDashboard = RequiredSheet(wbMaster, SHEET_DASHBOARD)
-            Call RemoveAllSlicerCaches(wbMaster)
+            Call modNeoDashboard.RemoveAllSlicerCaches(wbMaster)
             Call ClearWorksheetView(wsDashboard)
             Call ClearWorksheetView(wsNeo)
             Call ClearWorksheetView(wsRep)
@@ -293,6 +303,7 @@ ExitPoint:
     Set wsRep = Nothing
     Set wsDashboard = Nothing
     Set wbMaster = Nothing
+    Set savePathCell = Nothing
     Set wbLauncher = Nothing
     If errNumber <> 0 Then
         Call DisplayErrors
