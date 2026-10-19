@@ -126,8 +126,6 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
     Const METHOD_NAME As String = "ApplyDataFormatting"
     Dim body As Range
     Dim amounts As Range
-    Dim rowFillRange As Range
-    Dim fillArea As Range
     Dim issueRange As Range
     Dim statusRange As Range
     Dim rule As FormatCondition
@@ -208,17 +206,15 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
             formula = "=(" & doneAddress & "<>""" & ChrW(&H2713) & """)*(" & _
                 doubtAddress & "<>""?"")*((" & groupAddress & "=""SecCash"")+(" & _
                 groupAddress & "=""Security""))"
-            Set rowFillRange = Application.Union( _
-                ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)), _
-                ws.Range(ws.Cells(firstRow, 4), ws.Cells(lastRow, lastColumn)))
-            For Each fillArea In rowFillRange.Areas
-                Call AddFillRule(fillArea, formula, RGB(239, 230, 247))
-                Call AddFillRule(fillArea, "=" & doubtAddress & "=""?""", RGB(255, 217, 179))
-                Call AddFillRule(fillArea, "=" & doneAddress & "=""" & ChrW(&H2713) & """", RGB(198, 239, 206))
-            Next fillArea
+            Call AddFillRule(body, formula, RGB(239, 230, 247))
+            Call AddFillRule(body, "=" & doubtAddress & "=""?""", RGB(255, 217, 179))
+            Call AddFillRule(body, "=" & doneAddress & "=""" & ChrW(&H2713) & """", RGB(198, 239, 206))
             Set issueRange = ws.Range(ws.Cells(firstRow, 3), ws.Cells(lastRow, 3))
             formula = "=" & ws.Cells(firstRow, 3).Address(False, True) & "=""" & ChrW(&H2713) & """"
-            Call AddFillRule(issueRange, formula, RGB(255, 80, 80))
+            Set rule = issueRange.FormatConditions.Add(Type:=xlExpression, Formula1:=formula)
+            rule.Interior.Color = RGB(255, 80, 80)
+            rule.SetFirstPriority
+            rule.StopIfTrue = True
             Set statusRange = ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 3))
             statusValues = statusRange.Value2
             For statusRow = 1 To UBound(statusValues, 1)
@@ -265,8 +261,6 @@ ExitPoint:
     Set statusRange = Nothing
     Set amounts = Nothing
     Set issueRange = Nothing
-    Set fillArea = Nothing
-    Set rowFillRange = Nothing
     Set body = Nothing
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
@@ -303,7 +297,11 @@ Public Sub FormatHeader(ByVal target As Range)
     target.Interior.Color = RGB(31, 55, 79)
     target.WrapText = True
     target.VerticalAlignment = xlCenter
-    target.RowHeight = 46
+    If target.Parent.Name = SHEET_DASHBOARD And target.Row = DASH_HEADER_ROW Then
+        target.RowHeight = 70
+    Else
+        target.RowHeight = 46
+    End If
 
 ExitPoint:
     If errNumber <> 0 Then
