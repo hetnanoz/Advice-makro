@@ -255,6 +255,10 @@ Public Function ChooseAllocationColumn(ByVal ws As Worksheet, ByRef columnIndex 
     Dim itemIndex As Long
     Dim matchCount As Long
     Dim promptText As String
+    Dim todayDate As Date
+    Dim todayIndex As Long
+    Dim todayMatches As Long
+    Dim todayDetails As String
     Dim isCancelled As Boolean
     Dim errNumber As Long
     Dim errDescription As String
@@ -273,12 +277,26 @@ Public Function ChooseAllocationColumn(ByVal ws As Worksheet, ByRef columnIndex 
             End If
         End If
     Next itemIndex
-    answer = MsgBox("Uzyc dzisiejszej daty: " & Format$(Date, "dd/mm/yyyy") & "?" & vbCrLf & _
-        "Tak = znajdz dokladnie te date w I3:M3." & vbCrLf & _
+    todayDate = Date
+    For itemIndex = 1 To 5
+        If dates(itemIndex) = todayDate Then
+            todayIndex = itemIndex
+            todayMatches = todayMatches + 1
+        End If
+    Next itemIndex
+    If todayMatches = 1 Then
+        todayDetails = "(" & Format$(dates(todayIndex), "dd/mm/yyyy") & "; " & _
+            CStr(ws.Cells(REP_HEADER_ROW, todayIndex + 8).Value2) & _
+            "; kolumna " & Chr$(64 + todayIndex + 8) & ")"
+    Else
+        todayDetails = "(" & Format$(todayDate, "dd/mm/yyyy") & "; brak tej daty w I3:M3)"
+    End If
+    answer = MsgBox("Uzyc dzisiejszego dnia z Repartition " & todayDetails & "?" & vbCrLf & _
+        "Tak = pobierz Accountantow z pokazanej kolumny." & vbCrLf & _
         "Nie = wybierz dzien 1-5 z datami tego pliku.", vbYesNoCancel + vbQuestion, "Dzien alokacji")
     If answer = vbYes Then
         For itemIndex = 1 To 5
-            If dates(itemIndex) = Date Then
+            If dates(itemIndex) = todayDate Then
                 columnIndex = itemIndex + 8
                 allocationDate = dates(itemIndex)
                 matchCount = matchCount + 1
@@ -294,7 +312,7 @@ Public Function ChooseAllocationColumn(ByVal ws As Worksheet, ByRef columnIndex 
         For itemIndex = 1 To 5
             promptText = promptText & CStr(itemIndex) & " = " & _
                 CStr(ws.Cells(REP_HEADER_ROW, itemIndex + 8).Value2) & " " & _
-                Format$(dates(itemIndex), "dd/mm/yyyy") & vbCrLf
+                Format$(dates(itemIndex), "dd/mm/yyyy") & " | kolumna " & Chr$(72 + itemIndex) & vbCrLf
         Next itemIndex
         Do
             entered = Application.InputBox(promptText, "Dzien alokacji", Type:=1)
