@@ -57,6 +57,8 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
     Dim typeColumn As Long
     Dim isinColumn As Long
     Dim bankColumn As Long
+    Dim headerNames As Object
+    Dim issueColumn As ListColumn
     Dim lo As ListObject
     Dim tableRange As Range
     Dim errNumber As Long
@@ -82,14 +84,26 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
                     result(rowIndex, columnIndex) = "MFFA description"
                 Else
                     result(rowIndex, columnIndex) = CleanText(enriched(rowIndex, typeColumn)) & _
-                        " ISIN " & CleanText(enriched(rowIndex, isinColumn)) & " " & _
+                        " ISIN " & CleanText(enriched(rowIndex, isinColumn)) & " BR " & _
                         CleanText(enriched(rowIndex, bankColumn))
                 End If
             Else
-                result(rowIndex, columnIndex) = enriched(rowIndex, sourceIndex)
+                If rowIndex = 1 Then
+                    result(rowIndex, columnIndex) = DashboardHeader(CStr(enriched(rowIndex, sourceIndex)))
+                Else
+                    result(rowIndex, columnIndex) = enriched(rowIndex, sourceIndex)
+                End If
             End If
         Next columnIndex
     Next rowIndex
+    Set headerNames = CreateObject("Scripting.Dictionary")
+    headerNames.CompareMode = vbTextCompare
+    For columnIndex = 1 To columnCount
+        If headerNames.Exists(CStr(result(1, columnIndex))) Then
+            Err.Raise TOOL_ERROR + 186, METHOD_NAME, "Duplicate Dashboard header after renaming."
+        End If
+        headerNames.Add CStr(result(1, columnIndex)), True
+    Next columnIndex
     Set tableRange = ws.Cells(DASH_HEADER_ROW, 1).Resize(rowCount, UBound(result, 2))
     tableRange.NumberFormat = "@"
     tableRange.Value2 = result
@@ -113,6 +127,11 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
        CStr(lo.HeaderRowRange.Cells(1, 4).Value2) <> HDR_GROUP Then
         Err.Raise TOOL_ERROR + 127, METHOD_NAME, "UPDATE14: Dashboard column order validation failed."
     End If
+    If headerNames.Exists("Issue") Then
+        Err.Raise TOOL_ERROR + 187, METHOD_NAME, "Issue is a reserved Dashboard header."
+    End If
+    Set issueColumn = lo.ListColumns.Add(Position:=3)
+    issueColumn.Name = "Issue"
     Call SortDashboardRows(lo)
     Call FormatHeader(lo.HeaderRowRange)
     Call ApplyDataFormatting(ws, DASH_HEADER_ROW, DASH_HEADER_ROW + rowCount - 1, lo.ListColumns.Count, True)
@@ -125,6 +144,8 @@ Public Sub BuildDashboard(ByVal wb As Workbook, ByRef enriched As Variant, _
     Call WriteDashboardCaption(ws, allocationDate, runStamp, "MASTER")
 
 ExitPoint:
+    Set issueColumn = Nothing
+    Set headerNames = Nothing
     Set tableRange = Nothing
     Set lo = Nothing
     Set ws = Nothing
@@ -160,7 +181,7 @@ Public Sub WriteDashboardCaption(ByVal ws As Worksheet, ByVal allocationDate As 
     With ws.Cells(10, 1)
         .Value2 = "NeoAdvices " & TOOL_VERSION & " | " & viewName & " | Allocation: " & _
             Format$(allocationDate, "dd/mm/yyyy") & " | Run: " & runStamp & " | " & BatModeCaption() & _
-            " | Layout UPDATE21 | Done / Doubt: double-click a box"
+            " | Layout UPDATE24 | Done / Doubt / Issue: double-click a box"
         .Font.Name = "Calibri"
         .Font.Size = 10
         .Font.Bold = True
@@ -229,13 +250,13 @@ Public Sub CreateDashboardControls(ByVal wb As Workbook, ByVal individual As Boo
     For fieldIndex = LBound(fields) To UBound(fields)
         stepDescription = "Native slicer; field=" & CStr(fields(fieldIndex))
         Call CreateNativeTableSlicer(wb, ws, lo, CStr(fields(fieldIndex)), _
-            ws.Columns(3).Left + 6 + fieldIndex * 190)
+            ws.Columns(4).Left + 6 + fieldIndex * 190)
     Next fieldIndex
     captions = Array("ALL", "Cash", "SecCash", "Security", "Other", "SecCash + Security + Other")
     macroNames = Array("FilterAll", "FilterCash", "FilterSecCash", "FilterSecurity", _
         "FilterOther", "FilterSecCashSecurity")
     lastButton = UBound(captions)
-    leftPosition = ws.Columns(3).Left + 6
+    leftPosition = ws.Columns(4).Left + 6
     topPosition = ws.Rows(9).Top + 1
     For buttonIndex = 0 To lastButton
         stepDescription = "Create button " & CStr(captions(buttonIndex))
@@ -575,10 +596,11 @@ Public Function HasExistingProgress(ByVal wb As Workbook) As Boolean
     For Each lo In ws.ListObjects
         If lo.Name = TABLE_DASHBOARD Then
             If Not lo.DataBodyRange Is Nothing Then
-                values = lo.DataBodyRange.Columns(1).Resize(, 2).Value2
+                values = lo.DataBodyRange.Columns(1).Resize(, 3).Value2
                 For rowIndex = 1 To UBound(values, 1)
                     If CleanText(values(rowIndex, 1)) = ChrW(&H2713) Or _
-                       CleanText(values(rowIndex, 2)) = "?" Then
+                       CleanText(values(rowIndex, 2)) = "?" Or _
+                       CleanText(values(rowIndex, 3)) = ChrW(&H2713) Then
                         HasExistingProgress = True
                         Exit For
                     End If
@@ -704,7 +726,7 @@ Private Sub CreateNativeTableSlicer(ByVal wb As Workbook, ByVal ws As Worksheet,
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     stepDescription = "Validate field " & fieldName
-    fieldIndex = lo.ListColumns(fieldName).Index
+    fieldIndex = lo.ListColumns(DashboardHeader(fieldName)).Index
     fieldName = lo.ListColumns(fieldIndex).Name
     If Not ws.Parent Is wb Then
         Err.Raise TOOL_ERROR + 95, METHOD_NAME, "Slicer destination belongs to another workbook."
@@ -901,7 +923,7 @@ Public Sub SortDashboardRows(ByVal lo As ListObject)
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
     Set fundColumn = lo.ListColumns(HDR_FUND)
-    Set isinColumn = lo.ListColumns(HDR_ISIN)
+    Set isinColumn = lo.ListColumns(DashboardHeader(HDR_ISIN))
     If lo.ListRows.Count > 1 Then
         With lo.Sort
             .SortFields.Clear
@@ -992,7 +1014,7 @@ End Function
 ' Creation date: 2026-10-15
 ' Parameters:    ws: Dashboard worksheet in the explicitly supplied workbook.
 ' Returns:       None.
-' Description:   Freeze A/B only in windows currently displaying this Dashboard.
+' Description:   Freeze A/B/C only in windows currently displaying this Dashboard.
 '-------------------------------------------------------------------------------
 Public Sub FreezeDashboardStatusColumns(ByVal ws As Worksheet)
     Const METHOD_NAME As String = "FreezeDashboardStatusColumns"
@@ -1009,9 +1031,9 @@ Public Sub FreezeDashboardStatusColumns(ByVal ws As Worksheet)
         For Each view In wbMaster.Windows
             Set shownSheet = view.ActiveSheet
             If shownSheet Is ws Then
-                If Not view.FreezePanes Or view.SplitColumn <> 2 Then
+                If Not view.FreezePanes Or view.SplitColumn <> 3 Then
                     view.FreezePanes = False
-                    view.SplitColumn = 2
+                    view.SplitColumn = 3
                     view.FreezePanes = True
                 End If
             End If
