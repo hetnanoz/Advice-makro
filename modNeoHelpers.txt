@@ -271,16 +271,21 @@ Public Function GetColumnIndexByHeader(ByVal ws As Worksheet, ByVal headerRow As
     Dim lastColumn As Long
     Dim columnIndex As Long
     Dim headerValue As Variant
+    Dim requestedHeader As String
     Dim errNumber As Long
     Dim errDescription As String
 
     If Not DEV_MODE Then On Error GoTo ErrHandler
 
+    requestedHeader = headerName
+    If ws.Name = SHEET_DASHBOARD And headerRow = DASH_HEADER_ROW Then
+        requestedHeader = DashboardHeader(headerName)
+    End If
     Call GetDataBounds(ws, lastRow, lastColumn)
     For columnIndex = 1 To lastColumn
         headerValue = ws.Cells(headerRow, columnIndex).Value2
         If Not IsError(headerValue) Then
-            If StrComp(CStr(headerValue), headerName, vbBinaryCompare) = 0 Then
+            If StrComp(CStr(headerValue), requestedHeader, vbBinaryCompare) = 0 Then
                 If GetColumnIndexByHeader <> 0 Then
                     Err.Raise TOOL_ERROR + 2, METHOD_NAME, "Duplicate required header: " & headerName
                 End If
@@ -723,3 +728,158 @@ Public Sub ReleaseInputWorkbookSafe(ByRef wb As Workbook, ByRef openedByTool As 
 End Sub
 
 
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-19
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE23: DashboardHeader.
+'-------------------------------------------------------------------------------
+Public Function DashboardHeader(ByVal technicalName As String) As String
+    Const METHOD_NAME As String = "DashboardHeader"
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Select Case technicalName
+        Case "2_B_GL_Sec Acc"
+            DashboardHeader = "Security Account"
+        Case "4_D_GL_Bank Ref"
+            DashboardHeader = "Bank Reference"
+        Case "7_G_GL_Type"
+            DashboardHeader = "CA type"
+        Case "17_Q_GL_Status Code"
+            DashboardHeader = "Status Code"
+        Case "29_AC_CA_ISIN"
+            DashboardHeader = "ISIN"
+        Case "33_AG_CA_Quant"
+            DashboardHeader = "Quantity"
+        Case "123_DS_SM_Sec Movem Code"
+            DashboardHeader = "Security Movement Code"
+        Case "127_DW_SM_Posting Quant"
+            DashboardHeader = "Posting Quantity"
+        Case "146_EP_CM_Cash Movem Code"
+            DashboardHeader = "Cash Movement Code"
+        Case "152_EV_CM_Posting Amount"
+            DashboardHeader = "Cash Posting Amount"
+        Case Else
+            DashboardHeader = technicalName
+    End Select
+
+ExitPoint:
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-19
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE23: NeoSavePathCell.
+'-------------------------------------------------------------------------------
+Public Function NeoSavePathCell(ByVal wb As Workbook) As Range
+    Const METHOD_NAME As String = "NeoSavePathCell"
+    Dim item As Name
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    For Each item In wb.Names
+        If StrComp(item.Name, "save_path", vbTextCompare) = 0 Then
+            Set NeoSavePathCell = item.RefersToRange
+            If NeoSavePathCell.Cells.CountLarge <> 1 Then
+                Err.Raise TOOL_ERROR + 180, METHOD_NAME, "save_path must refer to one cell."
+            End If
+            If Not NeoSavePathCell.Parent.Parent Is wb Then
+                Err.Raise TOOL_ERROR + 181, METHOD_NAME, "save_path must belong to the launcher."
+            End If
+            Exit For
+        End If
+    Next item
+
+ExitPoint:
+    Set item = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-19
+' Parameters:    See typed signature.
+' Returns:       See typed signature.
+' Description:   UPDATE23: NeoDailyOutputFolder.
+'-------------------------------------------------------------------------------
+Public Function NeoDailyOutputFolder(ByVal wb As Workbook, ByVal runDate As Date) As String
+    Const METHOD_NAME As String = "NeoDailyOutputFolder"
+    Dim cell As Range
+    Dim folder As String
+    Dim part As Variant
+    Dim fso As Object
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set cell = NeoSavePathCell(wb)
+    If Not cell Is Nothing Then
+        If IsError(cell.Value2) Then
+            Err.Raise TOOL_ERROR + 182, METHOD_NAME, "save_path contains an Excel error."
+        End If
+        folder = Trim$(CStr(cell.Value2))
+    End If
+    If Len(folder) = 0 Then folder = PickOutputFolder()
+    If Len(folder) > 0 Then
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        If InStr(1, folder, "://", vbTextCompare) > 0 Then
+            Err.Raise TOOL_ERROR + 183, METHOD_NAME, "save_path requires a Windows path, not a URL."
+        End If
+        If Not (Left$(folder, 2) = "\\" Or Mid$(folder, 2, 2) = ":\") Then
+            Err.Raise TOOL_ERROR + 184, METHOD_NAME, "save_path must be an absolute Windows path."
+        End If
+        If Not fso.FolderExists(folder) Then
+            Err.Raise TOOL_ERROR + 185, METHOD_NAME, "The save_path base folder does not exist."
+        End If
+        For Each part In Array(Format$(runDate, "yyyy"), Format$(runDate, "mm"), Format$(runDate, "dd"))
+            folder = fso.BuildPath(folder, CStr(part))
+            If Not fso.FolderExists(folder) Then fso.CreateFolder folder
+        Next part
+        NeoDailyOutputFolder = folder
+    End If
+
+ExitPoint:
+    Set cell = Nothing
+    Set fso = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
