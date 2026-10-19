@@ -243,6 +243,7 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
         rule.Font.Color = RGB(156, 0, 6)
         rule.SetFirstPriority
         rule.StopIfTrue = True
+        If isDashboard Then Call ApplyFundSeparators(ws, headerRow, lastRow, lastColumn)
     End If
 
 ExitPoint:
@@ -349,3 +350,54 @@ ErrHandler:
 End Sub
 
 
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-19
+' Parameters:    ws and the explicit table bounds.
+' Returns:       None.
+' Description:   Draw a medium black bottom border at each Fund boundary.
+'-------------------------------------------------------------------------------
+Private Sub ApplyFundSeparators(ByVal ws As Worksheet, ByVal headerRow As Long, _
+                               ByVal lastRow As Long, ByVal lastColumn As Long)
+    Const METHOD_NAME As String = "ApplyFundSeparators"
+    Dim values As Variant
+    Dim fundIndex As Long
+    Dim rowIndex As Long
+    Dim lastIndex As Long
+    Dim isBoundary As Boolean
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    fundIndex = GetColumnIndexByHeader(ws, headerRow, HDR_FUND)
+    values = ws.Cells(headerRow, fundIndex).Resize(lastRow - headerRow + 1, 1).Value2
+    lastIndex = UBound(values, 1)
+    For rowIndex = 2 To lastIndex
+        isBoundary = (rowIndex = lastIndex)
+        If Not isBoundary Then
+            isBoundary = (StrComp(CleanText(values(rowIndex, 1)), _
+                CleanText(values(rowIndex + 1, 1)), vbTextCompare) <> 0)
+        End If
+        If isBoundary Then
+            With ws.Cells(headerRow + rowIndex - 1, 1).Resize(1, lastColumn).Borders(xlEdgeBottom)
+                .LineStyle = xlContinuous
+                .Weight = xlMedium
+                .Color = RGB(0, 0, 0)
+            End With
+        End If
+    Next rowIndex
+
+ExitPoint:
+    values = Empty
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
