@@ -126,6 +126,9 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
     Const METHOD_NAME As String = "ApplyDataFormatting"
     Dim body As Range
     Dim amounts As Range
+    Dim rowFillRange As Range
+    Dim fillArea As Range
+    Dim issueRange As Range
     Dim statusRange As Range
     Dim rule As FormatCondition
     Dim firstRow As Long
@@ -156,6 +159,9 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
 
     firstRow = headerRow + 1
     If isDashboard Then
+        ws.Columns(1).ColumnWidth = 6
+        ws.Columns(2).ColumnWidth = 5.5
+        ws.Columns(3).ColumnWidth = 5.5
         For Each borderIndex In Array(xlEdgeLeft, xlEdgeTop, xlEdgeBottom, xlEdgeRight, _
                                       xlInsideVertical, xlInsideHorizontal)
             With ws.Cells(headerRow, 1).Resize(lastRow - headerRow + 1, lastColumn).Borders(borderIndex)
@@ -202,13 +208,21 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
             formula = "=(" & doneAddress & "<>""" & ChrW(&H2713) & """)*(" & _
                 doubtAddress & "<>""?"")*((" & groupAddress & "=""SecCash"")+(" & _
                 groupAddress & "=""Security""))"
-            Call AddFillRule(body, formula, RGB(239, 230, 247))
-            Call AddFillRule(body, "=" & doubtAddress & "=""?""", RGB(255, 217, 179))
-            Call AddFillRule(body, "=" & doneAddress & "=""" & ChrW(&H2713) & """", RGB(198, 239, 206))
-            Set statusRange = ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2))
+            Set rowFillRange = Application.Union( _
+                ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)), _
+                ws.Range(ws.Cells(firstRow, 4), ws.Cells(lastRow, lastColumn)))
+            For Each fillArea In rowFillRange.Areas
+                Call AddFillRule(fillArea, formula, RGB(239, 230, 247))
+                Call AddFillRule(fillArea, "=" & doubtAddress & "=""?""", RGB(255, 217, 179))
+                Call AddFillRule(fillArea, "=" & doneAddress & "=""" & ChrW(&H2713) & """", RGB(198, 239, 206))
+            Next fillArea
+            Set issueRange = ws.Range(ws.Cells(firstRow, 3), ws.Cells(lastRow, 3))
+            formula = "=" & ws.Cells(firstRow, 3).Address(False, True) & "=""" & ChrW(&H2713) & """"
+            Call AddFillRule(issueRange, formula, RGB(255, 80, 80))
+            Set statusRange = ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 3))
             statusValues = statusRange.Value2
             For statusRow = 1 To UBound(statusValues, 1)
-                For statusColumn = 1 To 2
+                For statusColumn = 1 To 3
                     If Len(CleanText(statusValues(statusRow, statusColumn))) = 0 Then
                         statusValues(statusRow, statusColumn) = ChrW(&H2610)
                     End If
@@ -217,9 +231,9 @@ Public Sub ApplyDataFormatting(ByVal ws As Worksheet, ByVal headerRow As Long, _
             statusRange.Value2 = statusValues
             statusRange.NumberFormat = "@"
             statusRange.Font.Size = 14
-            ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)).Font.Bold = True
-            ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)).Font.Name = "Segoe UI Symbol"
-            ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 2)).HorizontalAlignment = xlCenter
+            ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 3)).Font.Bold = True
+            ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 3)).Font.Name = "Segoe UI Symbol"
+            ws.Range(ws.Cells(firstRow, 1), ws.Cells(lastRow, 3)).HorizontalAlignment = xlCenter
         End If
         movementCodes = Array(HDR_SEC_CODE, HDR_CASH_CODE)
         movementAmounts = Array(HDR_SEC_QUANTITY, HDR_CASH_AMOUNT)
@@ -250,6 +264,9 @@ ExitPoint:
     Set rule = Nothing
     Set statusRange = Nothing
     Set amounts = Nothing
+    Set issueRange = Nothing
+    Set fillArea = Nothing
+    Set rowFillRange = Nothing
     Set body = Nothing
     If errNumber <> 0 Then
         Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
@@ -334,7 +351,11 @@ Public Sub FitDataColumns(ByVal ws As Worksheet, ByVal headerRow As Long, _
         numericIndex = GetColumnIndexByHeader(ws, headerRow, CStr(header))
         ws.Columns(numericIndex).ColumnWidth = 24
     Next header
-    If isDashboard Then ws.Columns("A:B").ColumnWidth = 7
+    If isDashboard Then
+        ws.Columns(1).ColumnWidth = 6
+        ws.Columns(2).ColumnWidth = 5.5
+        ws.Columns(3).ColumnWidth = 5.5
+    End If
 
 ExitPoint:
     If errNumber <> 0 Then
@@ -355,7 +376,7 @@ End Sub
 ' Creation date: 2026-10-19
 ' Parameters:    ws and the explicit table bounds.
 ' Returns:       None.
-' Description:   Draw a medium black bottom border at each Fund boundary.
+' Description:   Draw a thick black bottom border at each Fund boundary.
 '-------------------------------------------------------------------------------
 Private Sub ApplyFundSeparators(ByVal ws As Worksheet, ByVal headerRow As Long, _
                                ByVal lastRow As Long, ByVal lastColumn As Long)
@@ -382,7 +403,7 @@ Private Sub ApplyFundSeparators(ByVal ws As Worksheet, ByVal headerRow As Long, 
         If isBoundary Then
             With ws.Cells(headerRow + rowIndex - 1, 1).Resize(1, lastColumn).Borders(xlEdgeBottom)
                 .LineStyle = xlContinuous
-                .Weight = xlMedium
+                .Weight = xlThick
                 .Color = RGB(0, 0, 0)
             End With
         End If
