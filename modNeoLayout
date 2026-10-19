@@ -477,7 +477,7 @@ Private Sub ApplyLayout(ByVal wb As Workbook, ByRef layout As Variant)
     Call CaptureExcelState(state)
     Application.EnableEvents = False
     Application.ScreenUpdating = False
-    Call RemoveAllSlicerCaches(wb)
+    Call modNeoDashboard.RemoveAllSlicerCaches(wb)
     If lo.AutoFilter.FilterMode Then lo.AutoFilter.ShowAllData
     mutated = True
     Call WriteLayoutTable(ws, result, widths, formats)
@@ -726,6 +726,7 @@ Private Sub SaveLayoutFile(ByVal wb As Workbook, ByRef layout As Variant)
     Set xml = CreateObject("MSXML2.DOMDocument.6.0")
     Set rootNode = xml.createElement("layout")
     rootNode.setAttribute "owner", LayoutValue(wb, "Owner")
+    rootNode.setAttribute "schema", "21"
     xml.appendChild rootNode
     For i = 1 To UBound(layout, 1)
         Set node = xml.createElement("column")
@@ -772,6 +773,7 @@ Public Sub LoadAccountantLayout(ByVal wb As Workbook, ByVal accountantName As St
     Dim nodes As Object
     Dim node As Object
     Dim lo As ListObject
+    Dim schemaVersion As Variant
     Dim saved As Object
     Dim layout() As Variant
     Dim filePath As String
@@ -820,6 +822,12 @@ Public Sub LoadAccountantLayout(ByVal wb As Workbook, ByVal accountantName As St
                 layout(position, 2) = saved(header)
             End If
         Next i
+        schemaVersion = xml.documentElement.getAttribute("schema")
+        If IsNull(schemaVersion) Then
+            Call UpgradeLegacyLayout(wb, layout)
+        ElseIf CStr(schemaVersion) <> "21" Then
+            Call UpgradeLegacyLayout(wb, layout)
+        End If
         Call ApplyLayout(wb, layout)
     End If
 
@@ -949,6 +957,88 @@ ExitPoint:
     Set picker = Nothing
     Set wbMaster = Nothing
     If errNumber <> 0 Then Call DisplayErrors
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-19
+' Parameters:    wb: current output; layout: legacy preference array to migrate.
+' Returns:       Updated layout in the supplied array.
+' Description:   Migrate changed fields by name and retain all other preferences.
+'-------------------------------------------------------------------------------
+Private Sub UpgradeLegacyLayout(ByVal wb As Workbook, ByRef layout As Variant)
+    Const METHOD_NAME As String = "UpgradeLegacyLayout"
+    Dim entries As Object
+    Dim revised As Variant
+    Dim changedPositions As Variant
+    Dim item As Variant
+    Dim descriptionHeader As String
+    Dim bankHeader As String
+    Dim mffaHeader As String
+    Dim header As String
+    Dim i As Long
+    Dim position As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    ' Positions refer to the captured UPDATE21 default, never the user's live layout.
+    descriptionHeader = LayoutValue(wb, "Header8")
+    bankHeader = "4_D_GL_Bank Ref"
+    mffaHeader = "MFFA description"
+    Set entries = CreateObject("Scripting.Dictionary")
+    entries.CompareMode = vbTextCompare
+    For i = 1 To UBound(layout, 1)
+        entries.Add CStr(layout(i, 1)), CDbl(layout(i, 2))
+    Next i
+    changedPositions = Array(7, 8, 9, 12, 13, 15, 17, 18, 19, 20)
+    For Each item In changedPositions
+        header = LayoutValue(wb, "Header" & CStr(item))
+        If Not entries.Exists(header) Then
+            Err.Raise TOOL_ERROR + 181, METHOD_NAME, "Missing field during layout migration."
+        End If
+        entries(header) = Val(LayoutValue(wb, "Width" & CStr(item)))
+    Next item
+    ReDim revised(1 To UBound(layout, 1), 1 To 2)
+    For i = 1 To UBound(layout, 1)
+        header = CStr(layout(i, 1))
+        If header <> descriptionHeader And header <> bankHeader And header <> mffaHeader Then
+            position = position + 1
+            revised(position, 1) = header
+            revised(position, 2) = entries(header)
+            If header = HDR_STATUS Then
+                position = position + 1
+                revised(position, 1) = descriptionHeader
+                revised(position, 2) = entries(descriptionHeader)
+                position = position + 1
+                revised(position, 1) = bankHeader
+                revised(position, 2) = entries(bankHeader)
+            ElseIf header = HDR_ACCOUNTANT Then
+                position = position + 1
+                revised(position, 1) = mffaHeader
+                revised(position, 2) = entries(mffaHeader)
+            End If
+        End If
+    Next i
+    If position <> UBound(layout, 1) Then
+        Err.Raise TOOL_ERROR + 182, METHOD_NAME, "Layout migration did not retain every field."
+    End If
+    layout = revised
+
+ExitPoint:
+    Set entries = Nothing
+    revised = Empty
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
     Exit Sub
 
 ErrHandler:
