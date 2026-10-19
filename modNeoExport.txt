@@ -858,3 +858,200 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-19
+' Parameters:    runStamp: unique run label used by the existing folder allocator.
+' Returns:       An owned local staging folder containing IN_PROGRESS.txt.
+' Description:   Build locally; reject redirected network TEMP folders.
+'-------------------------------------------------------------------------------
+Public Function CreateLocalRunFolder(ByVal runStamp As String) As String
+    Const METHOD_NAME As String = "CreateLocalRunFolder"
+    Dim fso As Object
+    Dim tempRoot As String
+    Dim driveName As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    tempRoot = fso.GetSpecialFolder(2).Path
+    driveName = fso.GetDriveName(tempRoot)
+    If Left$(tempRoot, 2) = "\\" Then
+        Err.Raise TOOL_ERROR + 190, METHOD_NAME, "Windows TEMP points to a network location."
+    End If
+    If fso.GetDrive(driveName).DriveType = 3 Then
+        Err.Raise TOOL_ERROR + 190, METHOD_NAME, "Windows TEMP is on a mapped network drive."
+    End If
+    CreateLocalRunFolder = CreateRunFolder(tempRoot, runStamp)
+
+ExitPoint:
+    Set fso = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-19
+' Parameters:    localFolder: closed outputs; parentFolder: daily destination;
+'                runStamp: run label; expectedFiles: Master + Accountants + optional backup.
+' Returns:       Destination folder, marked COMPLETE only after successful transfer.
+' Description:   Copy each explicit file once, verify count/size, retain source on failure.
+'-------------------------------------------------------------------------------
+Public Function PublishLocalRun(ByVal localFolder As String, ByVal parentFolder As String, _
+                                ByVal runStamp As String, ByVal expectedFiles As Long) As String
+    Const METHOD_NAME As String = "PublishLocalRun"
+    Dim fso As Object
+    Dim sourceFolder As Object
+    Dim item As Object
+    Dim files As Collection
+    Dim name As Variant
+    Dim destination As String
+    Dim sourcePath As String
+    Dim targetPath As String
+    Dim completedFiles As Long
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    Set sourceFolder = fso.GetFolder(localFolder)
+    Set files = New Collection
+    If sourceFolder.SubFolders.Count <> 0 Then
+        Err.Raise TOOL_ERROR + 191, METHOD_NAME, "Unexpected staging subfolder."
+    End If
+    If Not fso.FileExists(fso.BuildPath(localFolder, "IN_PROGRESS.txt")) Then
+        Err.Raise TOOL_ERROR + 191, METHOD_NAME, "Local staging marker is missing."
+    End If
+    For Each item In sourceFolder.Files
+        If StrComp(item.Name, "IN_PROGRESS.txt", vbTextCompare) <> 0 Then
+            If LCase$(fso.GetExtensionName(item.Name)) <> "xlsm" Then
+                Err.Raise TOOL_ERROR + 192, METHOD_NAME, "Unexpected file in local staging folder."
+            End If
+            If item.Size <= 0 Then Err.Raise TOOL_ERROR + 192, METHOD_NAME, "Empty output file."
+            files.Add CStr(item.Name)
+        End If
+    Next item
+    If files.Count <> expectedFiles Or expectedFiles < 1 Then
+        Err.Raise TOOL_ERROR + 193, METHOD_NAME, "Output file count differs from expected batch."
+    End If
+    destination = CreateRunFolder(parentFolder, runStamp)
+    For Each name In files
+        completedFiles = completedFiles + 1
+        Application.StatusBar = "NeoAdvices: copying completed file " & _
+            CStr(completedFiles) & " / " & CStr(files.Count) & " to destination..."
+        sourcePath = fso.BuildPath(localFolder, CStr(name))
+        targetPath = fso.BuildPath(destination, CStr(name))
+        fso.CopyFile sourcePath, targetPath, False
+        If Not fso.FileExists(targetPath) Then
+            Err.Raise TOOL_ERROR + 194, METHOD_NAME, "Copied output is missing."
+        End If
+        If fso.GetFile(sourcePath).Size <> fso.GetFile(targetPath).Size Then
+            Err.Raise TOOL_ERROR + 194, METHOD_NAME, "Copied output size verification failed."
+        End If
+    Next name
+    If fso.GetFolder(destination).Files.Count <> files.Count + 1 Then
+        Err.Raise TOOL_ERROR + 195, METHOD_NAME, "Destination batch count verification failed."
+    End If
+    PublishLocalRun = FinalizeRunFolder(destination)
+
+ExitPoint:
+    Set item = Nothing
+    Set sourceFolder = Nothing
+    Set files = Nothing
+    Set fso = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    If Len(destination) > 0 Then
+        errDescription = errDescription & " Incomplete destination: " & destination
+    End If
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-10-19
+' Parameters:    localFolder: owned staging directory; destination: published batch;
+'                hadFailure: reports incomplete cleanup without undoing publication.
+' Returns:       None.
+' Description:   Delete only verified local copies after COMPLETE; never delete recursively.
+'-------------------------------------------------------------------------------
+Public Sub CleanupPublishedLocalRun(ByVal localFolder As String, ByVal destination As String, _
+                                    ByRef hadFailure As Boolean)
+    Const METHOD_NAME As String = "CleanupPublishedLocalRun"
+    Dim fso As Object
+    Dim folder As Object
+    Dim item As Object
+    Dim files As Collection
+    Dim name As Variant
+    Dim targetPath As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    Set fso = CreateObject("Scripting.FileSystemObject")
+    If StrComp(fso.GetAbsolutePathName(localFolder), _
+               fso.GetAbsolutePathName(destination), vbTextCompare) = 0 Then
+        Err.Raise TOOL_ERROR + 196, METHOD_NAME, "Refusing to clean the destination."
+    End If
+    If Not fso.FileExists(fso.BuildPath(destination, "COMPLETE.txt")) Then
+        Err.Raise TOOL_ERROR + 196, METHOD_NAME, "Destination is not complete."
+    End If
+    Set folder = fso.GetFolder(localFolder)
+    Set files = New Collection
+    If folder.SubFolders.Count <> 0 Then
+        Err.Raise TOOL_ERROR + 196, METHOD_NAME, "Unexpected local subfolder; cleanup skipped."
+    End If
+    For Each item In folder.Files
+        If StrComp(item.Name, "IN_PROGRESS.txt", vbTextCompare) <> 0 Then
+            targetPath = fso.BuildPath(destination, item.Name)
+            If Not fso.FileExists(targetPath) Then
+                Err.Raise TOOL_ERROR + 196, METHOD_NAME, "No published copy; cleanup skipped."
+            End If
+            If item.Size <> fso.GetFile(targetPath).Size Then
+                Err.Raise TOOL_ERROR + 196, METHOD_NAME, "Published size changed; cleanup skipped."
+            End If
+            files.Add CStr(item.Path)
+        End If
+    Next item
+    For Each name In files
+        fso.DeleteFile CStr(name), False
+    Next name
+    fso.DeleteFile fso.BuildPath(localFolder, "IN_PROGRESS.txt"), False
+    RmDir localFolder
+
+ExitPoint:
+    Set item = Nothing
+    Set folder = Nothing
+    Set files = Nothing
+    Set fso = Nothing
+    Exit Sub
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    hadFailure = True
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Sub
