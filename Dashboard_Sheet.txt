@@ -83,13 +83,16 @@ Private Sub Worksheet_BeforeDoubleClick(ByVal Target As Range, Cancel As Boolean
         Next candidate
         If Not lo Is Nothing Then
             If Not lo.DataBodyRange Is Nothing Then
-                Set hit = Application.Intersect(Target, lo.DataBodyRange.Columns(1).Resize(, 2))
+                Set hit = Application.Intersect(Target, lo.DataBodyRange.Columns(1).Resize(, 3))
                 If Not hit Is Nothing Then
                     Cancel = True
                     If Target.Column = lo.ListColumns("Done").Range.Column Then
                         If CleanText(Target.Value2) <> ChrW(&H2713) Then mode = 1
-                    Else
+                    ElseIf Target.Column = lo.ListColumns("Doubt").Range.Column Then
                         If CleanText(Target.Value2) <> "?" Then mode = 2
+                    Else
+                        mode = 3
+                        If CleanText(Target.Value2) = ChrW(&H2713) Then mode = 4
                     End If
                     Call ApplyNeoStatus(Me, Target, mode)
                 End If
