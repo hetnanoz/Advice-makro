@@ -637,9 +637,9 @@ Public Function AcquireInputWorkbook(ByVal filePath As String, _
 
     openedByTool = False
     Set fso = CreateObject("Scripting.FileSystemObject")
-    selectedPath = fso.GetAbsolutePathName(filePath)
+    selectedPath = CanonicalInputPath(filePath)
     For Each wb In Application.Workbooks
-        If StrComp(wb.FullName, selectedPath, vbTextCompare) = 0 Then
+        If StrComp(CanonicalInputPath(wb.FullName), selectedPath, vbTextCompare) = 0 Then
             Set AcquireInputWorkbook = wb
             Exit For
         End If
@@ -891,3 +891,63 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Function
+
+
+'-------------------------------------------------------------------------------
+' Author:        Pawel Ligezka
+' Creation date: 2026-11-12
+' Parameters:    filePath: selected path or full name of an open workbook.
+' Returns:       Absolute path with mapped network drive expanded to its UNC share.
+' Description:   Match the same input opened through a drive letter or UNC path.
+'-------------------------------------------------------------------------------
+Private Function CanonicalInputPath(ByVal filePath As String) As String
+    Const METHOD_NAME As String = "CanonicalInputPath"
+    Dim fso As Object
+    Dim drive As Object
+    Dim result As String
+    Dim driveName As String
+    Dim shareName As String
+    Dim errNumber As Long
+    Dim errDescription As String
+
+    If Not DEV_MODE Then On Error GoTo ErrHandler
+
+    ' URL-backed workbooks cannot be equated to local paths without a verified mapping.
+    If InStr(1, filePath, "://", vbTextCompare) > 0 Then
+        result = filePath
+    Else
+        Set fso = CreateObject("Scripting.FileSystemObject")
+        result = fso.GetAbsolutePathName(filePath)
+        If Mid$(result, 2, 2) = ":\" Then
+            driveName = Left$(result, 2)
+            If fso.DriveExists(driveName) Then
+                Set drive = fso.GetDrive(driveName)
+                If drive.DriveType = 3 Then
+                    shareName = CStr(drive.ShareName)
+                    If Len(shareName) > 0 Then
+                        If Right$(shareName, 1) = "\" Then
+                            shareName = Left$(shareName, Len(shareName) - 1)
+                        End If
+                        result = shareName & Mid$(result, 3)
+                    End If
+                End If
+            End If
+        End If
+    End If
+    CanonicalInputPath = result
+
+ExitPoint:
+    Set drive = Nothing
+    Set fso = Nothing
+    If errNumber <> 0 Then
+        Call VBA.Err.Raise(errNumber, CLASS_NAME & "." & METHOD_NAME, errDescription)
+    End If
+    Exit Function
+
+ErrHandler:
+    errNumber = VBA.Err.Number
+    errDescription = VBA.Err.Description
+    Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
+    GoTo ExitPoint
+End Function
+
