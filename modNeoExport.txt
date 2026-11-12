@@ -804,6 +804,7 @@ Private Sub PopulateGroupedRows(ByVal lo As ListObject, ByRef groupedData As Var
     Dim ws As Worksheet
     Dim oldBody As Range
     Dim newTable As Range
+    Dim dataTarget As Range
     Dim oldRowCount As Long
     Dim rowIndex As Long
     Dim ownerColumn As Long
@@ -815,6 +816,9 @@ Private Sub PopulateGroupedRows(ByVal lo As ListObject, ByRef groupedData As Var
 
     Set ws = lo.Parent
     Set oldBody = lo.DataBodyRange
+    If oldBody Is Nothing Then
+        Err.Raise TOOL_ERROR + 177, METHOD_NAME, "Source Dashboard has no data rows."
+    End If
     oldRowCount = oldBody.Rows.Count
     columnCount = lo.ListColumns.Count
     ownerColumn = lo.ListColumns(HDR_ACCOUNTANT).Index
@@ -841,9 +845,21 @@ Private Sub PopulateGroupedRows(ByVal lo As ListObject, ByRef groupedData As Var
     If oldRowCount > expectedCount Then
         oldBody.Cells(expectedCount + 1, 1).Resize(oldRowCount - expectedCount, columnCount).Clear
     End If
-    lo.DataBodyRange.Value2 = groupedData
+    ' A cleared one-row table may expose DataBodyRange as Nothing.
+    ' Write to explicit worksheet coordinates, then reassert the populated table bounds.
+    Set dataTarget = ws.Cells(lo.HeaderRowRange.Row + 1, lo.Range.Column).Resize( _
+        expectedCount, columnCount)
+    dataTarget.Value2 = groupedData
+    lo.Resize newTable
+    If lo.DataBodyRange Is Nothing Then
+        Err.Raise TOOL_ERROR + 179, METHOD_NAME, "Dashboard body is missing after data population."
+    End If
+    If lo.ListRows.Count <> expectedCount Or lo.ListColumns.Count <> columnCount Then
+        Err.Raise TOOL_ERROR + 179, METHOD_NAME, "Populated Dashboard dimensions do not match."
+    End If
 
 ExitPoint:
+    Set dataTarget = Nothing
     Set newTable = Nothing
     Set oldBody = Nothing
     Set ws = Nothing
@@ -1055,3 +1071,4 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
+
