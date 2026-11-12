@@ -979,9 +979,16 @@ Public Function PublishLocalRun(ByVal localFolder As String, ByVal parentFolder 
             Err.Raise TOOL_ERROR + 194, METHOD_NAME, "Copied output size verification failed."
         End If
     Next name
-    If fso.GetFolder(destination).Files.Count <> files.Count + 1 Then
-        Err.Raise TOOL_ERROR + 195, METHOD_NAME, "Destination batch count verification failed."
+    ' Verify the exact manifest, not unrelated files or Excel lock files in the folder.
+    If completedFiles <> expectedFiles Then
+        Err.Raise TOOL_ERROR + 195, METHOD_NAME, "Transferred file count differs from expected batch."
     End If
+    For Each name In files
+        targetPath = fso.BuildPath(destination, CStr(name))
+        If Not fso.FileExists(targetPath) Then
+            Err.Raise TOOL_ERROR + 195, METHOD_NAME, "An expected output disappeared after transfer."
+        End If
+    Next name
     PublishLocalRun = FinalizeRunFolder(destination)
 
 ExitPoint:
