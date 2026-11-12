@@ -8,7 +8,7 @@ Private Const CLASS_NAME As String = "modNeoMain"
 ' Creation date: 2026-10-14
 ' Parameters:    See the typed signature below.
 ' Returns:       None
-' Description:   Validate a saved, writable dedicated XLSM with its three persistent sheets.
+' Description:   Validate a saved dedicated XLSM; allow a read-only source with writable output copies.
 '-------------------------------------------------------------------------------
 Private Sub ValidateMaster(ByVal wb As Workbook)
     Const METHOD_NAME As String = "ValidateMaster"
@@ -24,7 +24,7 @@ Private Sub ValidateMaster(ByVal wb As Workbook)
     If wb.FileFormat <> xlOpenXMLWorkbookMacroEnabled Or Len(wb.Path) = 0 Then
         Err.Raise TOOL_ERROR + 71, METHOD_NAME, "Save the Master as an XLSM file before running this tool."
     End If
-    If wb.ReadOnly Then Err.Raise TOOL_ERROR + 72, METHOD_NAME, "The Master is read-only."
+    ' UPDATE32: a read-only launcher is valid; all output work uses a writable local copy.
     If wb.ProtectStructure Then Err.Raise TOOL_ERROR + 73, METHOD_NAME, "Workbook structure is protected."
     If wb.Sheets.Count <> 3 Or wb.Worksheets.Count <> 3 Then
         Err.Raise TOOL_ERROR + 74, METHOD_NAME, "This tool requires exactly the three documented worksheets."
@@ -211,14 +211,16 @@ Public Sub RunNeoAdvices()
             If Not HasNeoFlag(wbLauncher, LAUNCHER_MARKER) Then
                 backupPath = UniqueOutputPath(stagingFolder, "Macro_BEFORE_LAUNCHER_" & runStamp)
                 wbLauncher.SaveCopyAs backupPath
-                Set savePathCell = NeoSavePathCell(wbLauncher)
-                If Not savePathCell Is Nothing Then savedPathValue = savePathCell.Value2
-                Call PrepareNeoLauncher(wbLauncher)
-                If Not savePathCell Is Nothing Then
-                    savePathCell.Value2 = savedPathValue
-                    wbLauncher.Save
+                If Not wbLauncher.ReadOnly Then
+                    Set savePathCell = NeoSavePathCell(wbLauncher)
+                    If Not savePathCell Is Nothing Then savedPathValue = savePathCell.Value2
+                    Call PrepareNeoLauncher(wbLauncher)
+                    If Not savePathCell Is Nothing Then
+                        savePathCell.Value2 = savedPathValue
+                        wbLauncher.Save
+                    End If
                 End If
-            Else
+            ElseIf Not wbLauncher.ReadOnly Then
                 wbLauncher.Save
             End If
             masterPath = UniqueOutputPath(stagingFolder, "NeoAdvices_MASTER_" & runStamp)
@@ -227,6 +229,10 @@ Public Sub RunNeoAdvices()
                 ReadOnly:=False, IgnoreReadOnlyRecommended:=True, Notify:=False, AddToMru:=False)
             If wbMaster.ReadOnly Then
                 Err.Raise TOOL_ERROR + 141, METHOD_NAME, "Output Master opened read-only."
+            End If
+            ' First-time setup of a read-only source happens only in its writable local copy.
+            If Not HasNeoFlag(wbMaster, LAUNCHER_MARKER) Then
+                Call PrepareNeoLauncher(wbMaster)
             End If
             Call SetLayoutValue(wbMaster, "Folder", LayoutDefaultsFolder(wbLauncher))
             wbMaster.Worksheets(SHEET_RUN).Name = SHEET_DASHBOARD
@@ -329,4 +335,5 @@ ErrHandler:
     Call RecordError(CLASS_NAME, METHOD_NAME, errNumber, errDescription)
     GoTo ExitPoint
 End Sub
+
 
